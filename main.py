@@ -31,10 +31,81 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+# The menu URLs are the existing permission identifiers. A missing or disabled
+# menu fails closed, including for aliases of the same module.
+MODULE_URLS = {
+    "peak": {"/peak-period"},
+    "affinity": {"/menus/customer-affinity"},
+    "ink": {"/menus/ink", "/menus/ink-dependency"},
+}
+
+
+def _module_for_path(path: str) -> str | None:
+    if path == "/peak-period" or path.startswith(("/api/peak/", "/api/product-peak-detail/")) or path in {"/api/peak-timing", "/api/products-peak-ranking", "/api/products-list", "/api/categories"}:
+        return "peak"
+    if path == "/menus/customer-affinity" or path.startswith("/api/customer-affinity/"):
+        return "affinity"
+    if path in MODULE_URLS["ink"] or path.startswith("/api/ink-dependency/"):
+        return "ink"
+    return None
+
+
+def _full_access(user: dict) -> bool:
+    return user.get("role") == "Admin" or user.get("allowed_menus") == "*"
+
+
+def _allowed_modules(user: dict) -> set[str]:
+    if _full_access(user):
+        return set(MODULE_URLS)
+    menus = database.get_sidebar_menus(user_id=user["id"])
+    ids = set(user.get("allowed_menus") or [])
+    items = [item for parent in menus for item in [parent, *parent.get("submenus", [])] if item.get("id") in ids]
+    return {name for name, urls in MODULE_URLS.items() if any(item.get("url") in urls and not item.get("is_disabled") and item.get("is_active") for item in items)}
+
+
+def _landing(user: dict) -> str:
+    if _full_access(user):
+        return "/menus/dashboard"
+    allowed = _allowed_modules(user)
+    return next((url for module, url in [("peak", "/peak-period"), ("affinity", "/menus/customer-affinity"), ("ink", "/menus/ink")] if module in allowed), "/access-denied")
+
+
+@app.middleware("http")
+async def access_control(request: Request, call_next):
+    path = request.url.path
+    public = path in {"/login", "/api/auth/login", "/logout", "/docs", "/openapi.json", "/redoc"} or path.startswith("/static/")
+    if public:
+        return await call_next(request)
+    user = await run_in_threadpool(database.get_session_user, request.cookies.get("session_token"))
+    request.state.user = user
+    api = path.startswith("/api/")
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"}) if api else RedirectResponse("/login", status_code=303)
+    if path == "/access-denied":
+        return HTMLResponse('<p>No permitted modules. Contact an administrator.</p><p><a href="/logout">Sign out</a></p>', status_code=403)
+    if path == "/":
+        return RedirectResponse(await run_in_threadpool(_landing, user), status_code=303)
+    admin_only = path in {"/user", "/menus/user", "/menus/main", "/menus/sub"} or path.startswith("/api/users") or (path.startswith("/api/menus") and (path != "/api/menus" or request.method != "GET" or request.query_params.get("all", "false").lower() not in {"false", "0", "off", "no"}))
+    module = _module_for_path(path)
+    if admin_only:
+        allowed = user.get("role") == "Admin"
+    elif module:
+        allowed = module in await run_in_threadpool(_allowed_modules, user)
+    elif path == "/api/menus":
+        allowed = True
+    elif path == "/menus/dashboard" or path.startswith("/api/ai/") or path in {"/api/dashboard/full-overview", "/api/stats", "/api/db-status"}:
+        allowed = _full_access(user)
+    else:
+        allowed = False
+    if not allowed:
+        return JSONResponse(status_code=403, content={"error": "Forbidden"}) if api else HTMLResponse("Forbidden", status_code=403)
+    return await call_next(request)
+
+
 def is_authenticated(request: Request) -> bool:
-    """Check if incoming request has a valid session cookie."""
-    token = request.cookies.get("session_token")
-    return database.verify_session(token)
+    if hasattr(request.state, "user"):
+        return request.state.user is not None
+    return database.verify_session(request.cookies.get("session_token"))
 
 
 def require_ai_auth(request: Request) -> JSONResponse | None:
@@ -50,8 +121,9 @@ def require_ai_auth(request: Request) -> JSONResponse | None:
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render Login Page. Redirect to dashboard if already authenticated."""
-    if is_authenticated(request):
-        return RedirectResponse(url="/menus/dashboard", status_code=303)
+    user = await run_in_threadpool(database.get_session_user, request.cookies.get("session_token"))
+    if user:
+        return RedirectResponse(url=await run_in_threadpool(_landing, user), status_code=303)
     return templates.TemplateResponse(request, "login.html")
 
 
@@ -72,14 +144,19 @@ async def process_login(request: Request, response: Response):
 
     # Valid login -> create session
     days = 30 if remember else 1
-    raw_token = database.create_session(user["id"], days=days)
+    raw_token = await run_in_threadpool(database.create_session, user["id"], user["password_hash"], days=days)
+    if not raw_token:
+        return JSONResponse(status_code=401, content={"success": False, "message": "Please sign in again."})
     
-    json_resp = JSONResponse(content={"success": True, "redirect": "/menus/dashboard"})
+    session_user = await run_in_threadpool(database.get_session_user, raw_token)
+    redirect = await run_in_threadpool(_landing, session_user) if session_user else "/login"
+    json_resp = JSONResponse(content={"success": True, "redirect": redirect})
     json_resp.set_cookie(
         key="session_token",
         value=raw_token,
         max_age=days * 86400,
         httponly=True,
+        secure=request.url.scheme == "https",
         samesite="lax",
     )
     return json_resp
@@ -177,7 +254,10 @@ async def update_user(user_id: int, request: Request):
     if not is_authenticated(request):
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
     payload = await request.json()
-    success = database.update_dashboard_user(user_id, payload)
+    try:
+        success = database.update_dashboard_user(user_id, payload)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     return {"success": success, "message": "User updated successfully" if success else "User not found"}
 
 
@@ -501,10 +581,19 @@ async def get_menus(request: Request, all: bool = False):
     if all:
         # When all=true, return every menu (used by permission checkboxes) — no user filter
         return database.get_sidebar_menus(all_menus=True, user_id=None)
-    token = request.cookies.get("session_token")
-    user = database.get_session_user(token)
-    user_id = user["id"] if user else None
-    return database.get_sidebar_menus(all_menus=False, user_id=user_id)
+    user = request.state.user
+    user_id = None if user.get("role") == "Admin" else user["id"]
+    menus = database.get_sidebar_menus(all_menus=False, user_id=user_id)
+    if user.get("role") != "Admin":
+        admin_urls = {"/menus/main", "/menus/sub", "/menus/user", "/user"}
+        filtered = []
+        for menu in menus:
+            children = menu.get("submenus", [])
+            menu["submenus"] = [child for child in children if child.get("url") not in admin_urls]
+            if menu.get("url") not in admin_urls and (not children or menu["submenus"]):
+                filtered.append(menu)
+        menus = filtered
+    return menus
 
 
 @app.get("/api/menus/main-list")
@@ -523,7 +612,10 @@ async def get_submenus():
 async def create_menu(request: Request):
     """Create a new menu (main or sub) in database."""
     payload = await request.json()
-    new_id = database.create_sidebar_menu(payload)
+    try:
+        new_id = database.create_sidebar_menu(payload)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     return {"success": True, "id": new_id, "message": "Menu created successfully"}
 
 
@@ -531,7 +623,10 @@ async def create_menu(request: Request):
 async def update_menu(menu_id: int, request: Request):
     """Update an existing sidebar menu in database."""
     payload = await request.json()
-    success = database.update_sidebar_menu(menu_id, payload)
+    try:
+        success = database.update_sidebar_menu(menu_id, payload)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc)})
     return {"success": success, "message": "Menu updated successfully" if success else "Menu not found"}
 
 

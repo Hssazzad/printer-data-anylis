@@ -1,8 +1,32 @@
 import json
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlsplit
 from .connection import get_connection
 
 _menus_initialized = False
+
+def safe_menu_url(value: Any) -> str:
+    """Allow local paths, fragments, and absolute HTTP(S) links only."""
+    url = str(value or "#")
+    if url != url.strip() or any(ord(c) < 32 or ord(c) == 127 for c in url) or "\\" in url:
+        return "#"
+    if url.startswith("#") or (url.startswith("/") and not url.startswith("//")):
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "#"
+    if parts.scheme.lower() in ("http", "https") and parts.netloc and not parts.username and not parts.password:
+        return url
+    return "#"
+
+
+def _checked_url(value: Any) -> str:
+    url = str(value or "#")
+    if safe_menu_url(url) != url:
+        raise ValueError("Menu URL must be a local path, fragment, or HTTP(S) URL")
+    return url
+
 
 def init_menus_table():
     """Ensure sidebar_menus table exists with parent_id for AdminLTE-style treeview submenus."""
@@ -42,72 +66,31 @@ def init_menus_table():
             if cur.fetchone()["cnt"] == 0:
                 cur.execute("ALTER TABLE sidebar_menus ADD COLUMN parent_id INT DEFAULT NULL AFTER id, ADD INDEX idx_parent (parent_id);")
             
-            # Check if hierarchy is already set up, if not restructure
-            cur.execute("SELECT COUNT(*) as cnt FROM sidebar_menus WHERE parent_id IS NOT NULL")
-            has_submenus = cur.fetchone()["cnt"] > 0
-
-            if not has_submenus:
-                cur.execute("DELETE FROM sidebar_menus")
-                
-                # 1. Main Menu: Product Intelligence (Parent)
-                cur.execute("""
-                    INSERT INTO sidebar_menus (id, parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES (1, NULL, 'Product Intelligence', 'Core Analytics', '#', 'package', 'Analytics Modules', 1, 1, 0, 0)
-                """)
-                parent_1 = 1
-
-                # Submenus of Product Intelligence
-                cur.execute("""
-                    INSERT INTO sidebar_menus (parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES 
-                    (%s, 'Product Peak Period', '', '/peak-period', 'circle', 'Analytics Modules', 1, 1, 0, 0),
-                    (%s, 'Customer Affinity', '', '/menus/customer-affinity', 'circle', 'Analytics Modules', 2, 1, 0, 0),
-                    (%s, 'Ink Dependency', '', '/menus/ink', 'circle', 'Analytics Modules', 3, 1, 0, 0)
-                """, (parent_1, parent_1, parent_1))
-
-                # 2. Main Menu: Client Operations (Parent)
-                cur.execute("""
-                    INSERT INTO sidebar_menus (id, parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES (2, NULL, 'Client Operations', 'Risk & Accounts', '#', 'users', 'Analytics Modules', 2, 1, 0, 0)
-                """)
-                parent_2 = 2
-
-                # Submenus of Client Operations
-                cur.execute("""
-                    INSERT INTO sidebar_menus (parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES 
-                    (%s, 'Dormant Clients', '', '#', 'circle', 'Analytics Modules', 1, 1, 1, 0),
-                    (%s, 'High-Due Alert', '', '#', 'circle', 'Analytics Modules', 2, 1, 1, 0),
-                    (%s, 'Client Profitability', '', '#', 'circle', 'Analytics Modules', 3, 1, 1, 0)
-                """, (parent_2, parent_2, parent_2))
-
-                # 3. Menus (Parent Management Menu)
-                cur.execute("""
-                    INSERT INTO sidebar_menus (id, parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES (3, NULL, 'Menus', 'Navigation Control', '#', 'layers', 'System', 3, 1, 0, 0)
-                """)
-                parent_3 = 3
-
-                # Submenus of Menus
-                cur.execute("""
-                    INSERT INTO sidebar_menus (parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES 
-                    (%s, 'Main Menu List', '', '/menus/main', 'circle', 'System', 1, 1, 0, 0),
-                    (%s, 'Submenu List', '', '/menus/sub', 'circle', 'System', 2, 1, 0, 0)
-                """, (parent_3, parent_3))
-
-                # 4. Direct Link: API Documentation (No submenus)
-                cur.execute("""
-                    INSERT INTO sidebar_menus (parent_id, title, subtitle, url, icon, section, menu_order, is_active, is_disabled, target_blank)
-                    VALUES (NULL, 'API Documentation', '', '/docs', 'book-open', 'System', 4, 1, 0, 1)
-                """)
-
-            # Ensure modern module links are updated
-            cur.execute("""
-                UPDATE sidebar_menus 
-                SET url = '/menus/ink', is_disabled = 0 
-                WHERE title = 'Ink Dependency'
-            """)
+            # Initialize only a completely empty table. Never replace customized rows.
+            # Serialize first-run seeders across application workers.
+            cur.execute("SELECT GET_LOCK(CONCAT('printer_menus_', LEFT(SHA2(DATABASE(), 256), 48)), 10) AS acquired")
+            if cur.fetchone()["acquired"] != 1:
+                raise RuntimeError("Could not acquire menu initialization lock")
+            try:
+                cur.execute("SELECT COUNT(*) AS cnt FROM sidebar_menus")
+                if cur.fetchone()["cnt"] == 0:
+                    parents = [
+                        ("Product Intelligence", "Core Analytics", "package", "Analytics Modules", 1,
+                         [("Product Peak Period", "/peak-period", 0), ("Customer Affinity", "/menus/customer-affinity", 0), ("Ink Dependency", "/menus/ink", 0)]),
+                        ("Client Operations", "Risk & Accounts", "users", "Analytics Modules", 2,
+                         [("Dormant Clients", "#", 1), ("High-Due Alert", "#", 1), ("Client Profitability", "#", 1)]),
+                        ("Menus", "Navigation Control", "layers", "System", 3,
+                         [("Main Menu List", "/menus/main", 0), ("Submenu List", "/menus/sub", 0)]),
+                    ]
+                    for title, subtitle, icon, section, order, children in parents:
+                        cur.execute("INSERT INTO sidebar_menus (parent_id, title, subtitle, url, icon, section, menu_order) VALUES (NULL, %s, %s, '#', %s, %s, %s)", (title, subtitle, icon, section, order))
+                        parent_id = cur.lastrowid
+                        for child_order, (child_title, url, disabled) in enumerate(children, 1):
+                            cur.execute("INSERT INTO sidebar_menus (parent_id, title, url, icon, section, menu_order, is_disabled) VALUES (%s, %s, %s, 'circle', %s, %s, %s)", (parent_id, child_title, url, section, child_order, disabled))
+                    cur.execute("INSERT INTO sidebar_menus (title, url, icon, section, menu_order, target_blank) VALUES ('API Documentation', '/docs', 'book-open', 'System', 4, 1)")
+                conn.commit()
+            finally:
+                cur.execute("SELECT RELEASE_LOCK(CONCAT('printer_menus_', LEFT(SHA2(DATABASE(), 256), 48)))")
             conn.commit()
     _menus_initialized = True
 
@@ -126,6 +109,8 @@ def get_sidebar_menus(all_menus: bool = False, user_id: Optional[int] = None) ->
                 ORDER BY menu_order ASC, id ASC
             """)
             main_menus = cur.fetchall()
+            for menu in main_menus:
+                menu["url"] = safe_menu_url(menu.get("url"))
 
             # 2. Fetch all Submenus
             cur.execute(f"""
@@ -135,6 +120,8 @@ def get_sidebar_menus(all_menus: bool = False, user_id: Optional[int] = None) ->
                 ORDER BY menu_order ASC, id ASC
             """)
             all_submenus = cur.fetchall()
+            for menu in all_submenus:
+                menu["url"] = safe_menu_url(menu.get("url"))
 
             # Check permissions for user if user_id is provided
             allowed_ids = None
@@ -143,9 +130,10 @@ def get_sidebar_menus(all_menus: bool = False, user_id: Optional[int] = None) ->
                 user_row = cur.fetchone()
                 if user_row:
                     raw = user_row.get("allowed_menus")
-                    if raw and raw != "*":
+                    if raw != "*":
                         try:
-                            allowed_ids = set(json.loads(raw))
+                            parsed = json.loads(raw)
+                            allowed_ids = {x for x in parsed if isinstance(x, int) and not isinstance(x, bool)} if isinstance(parsed, list) else set()
                         except Exception:
                             allowed_ids = set(int(x.strip()) for x in str(raw).split(",") if x.strip().isdigit())
 
@@ -189,7 +177,7 @@ def create_sidebar_menu(data: Dict[str, Any]) -> int:
                 parent_id,
                 data.get("title", "New Menu"),
                 data.get("subtitle", ""),
-                data.get("url", "#"),
+                _checked_url(data.get("url", "#")),
                 data.get("icon", "circle"),
                 data.get("badge_text", ""),
                 data.get("section", "Analytics Modules"),
@@ -230,7 +218,7 @@ def update_sidebar_menu(menu_id: int, data: Dict[str, Any]) -> bool:
                 parent_id,
                 data.get("title", ""),
                 data.get("subtitle", ""),
-                data.get("url", "#"),
+                _checked_url(data.get("url", "#")),
                 data.get("icon", "circle"),
                 data.get("badge_text", ""),
                 data.get("section", "Analytics Modules"),
@@ -270,6 +258,7 @@ def get_main_menus_table() -> List[Dict[str, Any]]:
             """)
             rows = cur.fetchall()
             for r in rows:
+                r["url"] = safe_menu_url(r.get("url"))
                 for k, v in list(r.items()):
                     if hasattr(v, "strftime"):
                         r[k] = v.strftime("%Y-%m-%d %H:%M:%S")
@@ -291,6 +280,7 @@ def get_submenus_table() -> List[Dict[str, Any]]:
             """)
             rows = cur.fetchall()
             for r in rows:
+                r["url"] = safe_menu_url(r.get("url"))
                 for k, v in list(r.items()):
                     if hasattr(v, "strftime"):
                         r[k] = v.strftime("%Y-%m-%d %H:%M:%S")

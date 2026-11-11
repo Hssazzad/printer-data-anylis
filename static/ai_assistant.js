@@ -37,6 +37,8 @@
     var sendBtn = document.getElementById('gai-send');
     var responseBox = document.getElementById('gai-response');
     var status = document.getElementById('gai-status');
+    var actionButtons = document.querySelectorAll('[data-gai-action]');
+    var busy = false;
 
     function setStatus(text, isError) {
         status.textContent = text;
@@ -64,24 +66,37 @@
     });
 
     async function streamAI(url, body) {
+        if (busy) return false;
+        busy = true;
         sendBtn.disabled = true;
+        actionButtons.forEach(function (button) { button.disabled = true; });
         responseBox.classList.remove('hidden');
         responseBox.textContent = 'AI is analyzing the latest business data...';
         setStatus('Preparing a read-only analytics snapshot...', false);
         var answer = '';
+        var controller = new AbortController();
+        var timer;
+        var timeout = new Promise(function (_, reject) {
+            timer = setTimeout(function () {
+                controller.abort();
+                reject(new Error('AI request timed out. Please try again.'));
+            }, 120000);
+        });
         try {
-            var res = await fetch(url, {
+            var res = await Promise.race([fetch(url, {
                 method: 'POST',
                 headers: body ? { 'Content-Type': 'application/json' } : {},
-                body: body ? JSON.stringify(body) : undefined
-            });
+                body: body ? JSON.stringify(body) : undefined,
+                signal: controller.signal
+            }), timeout]);
             if ((res.status === 404 || res.status === 405) && url.endsWith('/stream')) {
-                var legacy = await fetch(url.slice(0, -7), {
+                var legacy = await Promise.race([fetch(url.slice(0, -7), {
                     method: 'POST',
                     headers: body ? { 'Content-Type': 'application/json' } : {},
-                    body: body ? JSON.stringify(body) : undefined
-                });
-                var data = await legacy.json().catch(function () { return {}; });
+                    body: body ? JSON.stringify(body) : undefined,
+                    signal: controller.signal
+                }), timeout]);
+                var data = await Promise.race([legacy.json(), timeout]);
                 if (!legacy.ok || !data.success) throw new Error(data.message || 'Server returned ' + legacy.status);
                 responseBox.textContent = data.answer;
                 setStatus('Generated from the latest available dashboard data.', false);
@@ -90,7 +105,7 @@
             if (!res.ok || !res.body) {
                 var message = 'Server returned ' + res.status;
                 try {
-                    var errorData = await res.json();
+                    var errorData = await Promise.race([res.json(), timeout]);
                     message = errorData.message || message;
                 } catch (e) {}
                 throw new Error(message);
@@ -98,8 +113,9 @@
             var reader = res.body.getReader();
             var decoder = new TextDecoder();
             var buffer = '';
+            var receivedDone = false;
             while (true) {
-                var chunk = await reader.read();
+                var chunk = await Promise.race([reader.read(), timeout]);
                 if (chunk.done) break;
                 buffer += decoder.decode(chunk.value, { stream: true });
                 var sep;
@@ -115,6 +131,7 @@
                         continue;
                     }
                     if (evt.error) throw new Error(evt.error);
+                    if (evt.done) receivedDone = true;
                     if (evt.delta) {
                         answer += evt.delta;
                         responseBox.textContent = answer;
@@ -122,6 +139,7 @@
                     }
                 }
             }
+            if (!receivedDone) throw new Error('AI response was interrupted.');
             if (!answer.trim()) throw new Error('AI returned an empty response.');
             setStatus('Generated from the latest available dashboard data.', false);
             return true;
@@ -130,7 +148,11 @@
             setStatus(err.message || 'AI request failed.', true);
             return false;
         } finally {
+            clearTimeout(timer);
+            controller.abort();
+            busy = false;
             sendBtn.disabled = false;
+            actionButtons.forEach(function (button) { button.disabled = false; });
         }
     }
 
@@ -143,10 +165,11 @@
 
     form.addEventListener('submit', async function (event) {
         event.preventDefault();
-        var message = input.value.trim();
+        var submitted = input.value;
+        var message = submitted.trim();
         if (!message) return;
         openPanel();
         var ok = await streamAI('/api/ai/chat/stream', { message: message });
-        if (ok) input.value = '';
+        if (ok && input.value === submitted) input.value = '';
     });
 })();

@@ -16,6 +16,34 @@ printer-data-anylis/
 └── venv/                # পাইথন ভার্চুয়াল এনভায়রনমেন্ট
 ```
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:4d68d6aa0d586ca59f0adde7ad3f8565a15602de29624932981b04c82984b0ba -->
+
+## Administrator setup and security
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:d72739272434b0db0184a81b2757a0f71a4f93a518fc5c18041a6b90acee414d -->
+
+Install `requirements.txt` and configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` for your MySQL database. From a trusted terminal, run `python manage_admin.py setup` to create a missing admin account and enter a new password when prompted. Alternatively, set `DASHBOARD_ADMIN_PASSWORD` in the process environment. Existing accounts are preserved.
+
+Before upgrading, resolve any duplicate usernames in `dashboard_auth`; initialization will stop with an error until they are unique. No accounts are deleted automatically.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+Existing installations with the original `admin` password must run `python manage_admin.py reset` from a trusted terminal before that account can log in. The reset revokes its existing sessions. Other existing passwords are upgraded to Argon2 when users next log in.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:ccc43f00c339a389c9e31b56bdfb8d329d3445ffd2273c25569b2ad6e54d9daa -->
+
+Menu permissions now protect module pages and APIs as well as sidebar links. Only admins can manage menus and users. The executive dashboard and AI assistant require admin or full access. During the first upgrade, existing empty permission values are converted to `*` to preserve their previous full access; subsequently, empty values grant no access. Review existing permissions before upgrading.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+<!-- /coderabbit-ai-generated:v1 -->
+
 ## 🚀 সার্ভার রান করার নিয়ম
 ```powershell
 .\venv\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000

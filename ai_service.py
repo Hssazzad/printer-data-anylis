@@ -62,7 +62,7 @@ def build_business_context() -> Dict[str, Any]:
 
     context = {
         "kpis": database.get_dashboard_kpis(),
-        "monthly_sales_trend": database.get_monthly_sales_trend(months=12),
+        "monthly_sales_trend": database.get_monthly_sales_trend(months=24),
         "top_products": database.get_top_selling_products(limit=10),
         "inventory_summary": database.get_inventory_summary(limit=10),
         "top_customers": database.get_top_customers(limit=10),

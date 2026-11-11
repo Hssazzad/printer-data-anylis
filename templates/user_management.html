@@ -144,7 +144,7 @@
                             <select id="user-role" onchange="handleRoleChange()" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium">
                                 <option value="Admin">Admin (Full Access)</option>
                                 <option value="Manager">Manager (Custom Access)</option>
-                                <option value="Operator">Operator (Restricted Access)</option>
+                                <option value="Operator" selected>Operator (Restricted Access)</option>
                             </select>
                         </div>
                         <div>
@@ -262,6 +262,8 @@
         applySidebarState();
 
         // Load Sidebar Navigation Dynamically
+        function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
         async function loadSidebarMenus() {
             try {
                 const res = await fetch('/api/menus');
@@ -286,7 +288,7 @@
             const currentPath = window.location.pathname;
 
             for (const [secTitle, items] of Object.entries(sections)) {
-                html += `<p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mt-4 mb-2 first:mt-1">${secTitle}</p>`;
+                html += `<p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mt-4 mb-2 first:mt-1">${esc(secTitle)}</p>`;
                 items.forEach((m, idx) => {
                     const hasSubmenus = m.submenus && m.submenus.length > 0;
                     const menuId = `menu-tree-${m.id || idx}`;
@@ -299,10 +301,10 @@
                                 <button type="button" onclick="toggleSubmenu('${menuId}')" class="sidebar-nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium ${isAnyChildActive ? 'text-white bg-white/10' : 'text-slate-300 hover:text-white'} transition group">
                                     <div class="flex items-center gap-3 overflow-hidden">
                                         <div class="w-8 h-8 rounded-lg ${isAnyChildActive ? 'bg-blue-600 shadow-sm text-white' : 'bg-slate-800 text-slate-400 group-hover:text-white'} flex items-center justify-center shrink-0">
-                                            <i data-lucide="${m.icon || 'folder'}" class="w-4 h-4"></i>
+                                            <i data-lucide="${esc(m.icon || 'folder')}" class="w-4 h-4"></i>
                                         </div>
                                         <div class="overflow-hidden text-left">
-                                            <span class="block truncate ${isAnyChildActive ? 'font-bold text-white' : 'font-medium'} text-xs">${m.title}</span>
+                                            <span class="block truncate ${isAnyChildActive ? 'font-bold text-white' : 'font-medium'} text-xs">${esc(m.title)}</span>
                                         </div>
                                     </div>
                                     <i id="${menuId}-arrow" data-lucide="chevron-right" class="w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isAnyChildActive ? 'rotate-90 text-blue-400' : ''}"></i>
@@ -312,9 +314,9 @@
                                         const isSubActive = currentPath === sub.url;
                                         const subActiveStyle = isSubActive ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white hover:bg-white/5';
                                         return `
-                                            <a href="${sub.url}" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition ${subActiveStyle}">
-                                                <i data-lucide="${sub.icon || 'circle'}" class="w-2.5 h-2.5 ${isSubActive ? 'text-white fill-white' : 'text-slate-400'} shrink-0"></i>
-                                                <span class="truncate">${sub.title}</span>
+                                            <a href="${esc(sub.url)}" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition ${subActiveStyle}">
+                                                <i data-lucide="${esc(sub.icon || 'circle')}" class="w-2.5 h-2.5 ${isSubActive ? 'text-white fill-white' : 'text-slate-400'} shrink-0"></i>
+                                                <span class="truncate">${esc(sub.title)}</span>
                                             </a>
                                         `;
                                     }).join('')}
@@ -324,12 +326,12 @@
                     } else {
                         const activeClass = isDirectActive ? 'active bg-blue-600/25 border-r-3 border-blue-500 text-white font-bold' : 'text-slate-400 hover:text-white';
                         html += `
-                            <a href="${m.url}" class="sidebar-nav-item ${activeClass} flex items-center px-3 py-2.5 rounded-lg text-sm font-medium">
+                            <a href="${esc(m.url)}" class="sidebar-nav-item ${activeClass} flex items-center px-3 py-2.5 rounded-lg text-sm font-medium">
                                 <div class="flex items-center gap-3 overflow-hidden">
                                     <div class="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
-                                        <i data-lucide="${m.icon || 'circle'}" class="w-4 h-4"></i>
+                                        <i data-lucide="${esc(m.icon || 'circle')}" class="w-4 h-4"></i>
                                     </div>
-                                    <span class="block truncate text-xs">${m.title}</span>
+                                    <span class="block truncate text-xs">${esc(m.title)}</span>
                                 </div>
                             </a>
                         `;
@@ -381,20 +383,20 @@
                 html += `
                     <div class="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs space-y-2">
                         <label class="flex items-center gap-2 cursor-pointer select-none">
-                            <input type="checkbox" name="menu_perm" value="${main.id}" class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 menu-perm-cb main-menu-cb" onchange="handleMainMenuCheck(this, ${main.id})" checked>
+                            <input type="checkbox" name="menu_perm" value="${main.id}" class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 menu-perm-cb main-menu-cb" onchange="handleMainMenuCheck(this, ${main.id})">
                             <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5 truncate">
-                                <i data-lucide="${main.icon || 'folder'}" class="w-3.5 h-3.5 text-blue-600 shrink-0"></i>
-                                <span class="truncate">${main.title}</span>
+                                <i data-lucide="${esc(main.icon || 'folder')}" class="w-3.5 h-3.5 text-blue-600 shrink-0"></i>
+                                <span class="truncate">${esc(main.title)}</span>
                             </span>
                         </label>
                         ${hasSubs ? `
                             <div class="pl-6 pt-1 space-y-1.5 border-l-2 border-slate-100 ml-2">
                                 ${main.submenus.map(sub => `
                                     <label class="flex items-center gap-2 cursor-pointer select-none">
-                                        <input type="checkbox" name="menu_perm" value="${sub.id}" data-parent="${main.id}" class="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 menu-perm-cb sub-menu-cb sub-of-${main.id}" checked>
+                                        <input type="checkbox" name="menu_perm" value="${sub.id}" data-parent="${main.id}" class="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 menu-perm-cb sub-menu-cb sub-of-${main.id}">
                                         <span class="text-[11px] font-medium text-slate-600 truncate flex items-center gap-1">
-                                            <i data-lucide="${sub.icon || 'circle'}" class="w-2.5 h-2.5 text-slate-400 shrink-0"></i>
-                                            <span class="truncate">${sub.title}</span>
+                                            <i data-lucide="${esc(sub.icon || 'circle')}" class="w-2.5 h-2.5 text-slate-400 shrink-0"></i>
+                                            <span class="truncate">${esc(sub.title)}</span>
                                         </span>
                                     </label>
                                 `).join('')}
@@ -485,30 +487,30 @@
                         <td class="px-5 py-3.5">
                             <div class="flex items-center gap-3">
                                 <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 font-extrabold flex items-center justify-center text-xs shrink-0">
-                                    ${(u.username || 'U')[0].toUpperCase()}
+                                    ${esc((u.username || 'U')[0].toUpperCase())}
                                 </div>
                                 <div>
-                                    <div class="font-bold text-slate-900">${u.username}</div>
-                                    <div class="text-[11px] font-mono text-slate-400">${u.phone || 'No phone'}</div>
+                                    <div class="font-bold text-slate-900">${esc(u.username)}</div>
+                                    <div class="text-[11px] font-mono text-slate-400">${esc(u.phone || 'No phone')}</div>
                                 </div>
                             </div>
                         </td>
-                        <td class="px-5 py-3.5 font-mono text-slate-700">${u.phone || '-'}</td>
+                        <td class="px-5 py-3.5 font-mono text-slate-700">${esc(u.phone || '-')}</td>
                         <td class="px-5 py-3.5 text-center">
                             <div class="inline-flex flex-col items-center gap-1">
                                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                                    ${u.role || 'Admin'}
+                                    ${esc(u.role || 'Admin')}
                                 </span>
                                 ${permBadge}
                             </div>
                         </td>
-                        <td class="px-5 py-3.5 text-slate-500">${u.created_at_formatted || '-'}</td>
+                        <td class="px-5 py-3.5 text-slate-500">${esc(u.created_at_formatted || '-')}</td>
                         <td class="px-5 py-3.5 text-right">
                             <div class="flex items-center justify-end gap-1.5">
                                 <button onclick="editUser(${u.id})" class="p-1.5 rounded-lg hover:bg-blue-50 text-blue-600 transition" title="Edit User & Permissions">
                                     <i data-lucide="edit-3" class="w-4 h-4"></i>
                                 </button>
-                                <button onclick="deleteUser(${u.id}, '${u.username}')" class="p-1.5 rounded-lg hover:bg-rose-50 text-rose-600 transition" title="Delete User">
+                                <button onclick="deleteUser(${u.id})" class="p-1.5 rounded-lg hover:bg-rose-50 text-rose-600 transition" title="Delete User">
                                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                                 </button>
                             </div>
@@ -519,7 +521,7 @@
             } catch (err) {
                 console.error("Failed to load users:", err);
                 const tbody = document.getElementById('users-tbody');
-                if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-6 text-center text-rose-500 font-medium">Failed to load users: ${err.message}</td></tr>`;
+                if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-6 text-center text-rose-500 font-medium">Failed to load users: ${esc(err.message)}</td></tr>`;
             }
         }
 
@@ -527,13 +529,13 @@
             document.getElementById('user-id').value = '';
             document.getElementById('user-username').value = '';
             document.getElementById('user-phone').value = '';
-            document.getElementById('user-role').value = 'Admin';
+            document.getElementById('user-role').value = 'Operator';
             document.getElementById('user-password').value = '';
             document.getElementById('user-password').required = true;
             document.getElementById('pwd-help').classList.add('hidden');
             document.getElementById('form-title').innerText = 'Add New User';
             document.getElementById('submit-btn-text').innerText = 'Save User';
-            selectAllMenuCheckboxes(true);
+            selectAllMenuCheckboxes(false);
         }
 
         function editUser(id) {
@@ -592,7 +594,8 @@
             }
         }
 
-        async function deleteUser(id, username) {
+        async function deleteUser(id) {
+            const username = cachedUsers.find(item => item.id === id)?.username || "";
             if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
                 return;
             }

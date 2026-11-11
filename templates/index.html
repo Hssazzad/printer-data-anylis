@@ -642,7 +642,7 @@
                 const avgValDisplay = hasSales ? (currentMode === 'qty' ? (Math.round(p.avg_monthly_qty).toLocaleString() + ' pcs') : formatBDT(p.avg_monthly_sales)) : '0';
                 const surgeVal = hasSales ? (currentMode === 'qty' ? p.surge_qty_pct : p.surge_sales_pct) : null;
                 return `
-                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="selectAndScrollProduct('${esc(p.product_id)}')">
+                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="selectAndScrollProduct(${esc(JSON.stringify(p.product_id))})">
                         <td class="px-5 py-3.5"><div class="font-bold text-slate-900 leading-snug">${esc(p.product_name)}</div><div class="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5"><span class="font-mono text-blue-600 font-semibold">${esc(p.product_id)}</span><span>·</span><span>${esc(p.category_name)}</span></div></td>
                         <td class="px-5 py-3.5 text-center">${hasSales ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 font-mono">${esc(peakMonthLabel)}</span>` : '<span class="text-slate-300 font-mono">-</span>'}</td>
                         <td class="px-5 py-3.5 text-right font-extrabold text-slate-900">${esc(peakValDisplay)}</td>
