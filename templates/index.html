@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Product Peak Period — seasonal demand spikes, peak months, weekdays and rush hours for printers, toner and supplies.">
+    <title>Product Peak Period — Printer Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        .sidebar-nav-item { transition: all 0.15s ease; }
+        .sidebar-nav-item:hover { background: rgba(255,255,255,0.08); }
+        .sidebar-nav-item.active { background: rgba(59, 130, 246, 0.25); border-right: 3px solid #3b82f6; }
+        .skeleton { position: relative; overflow: hidden; background: #e2e8f0; border-radius: 0.5rem; }
+        .skeleton::after { content:''; position:absolute; inset:0; transform: translateX(-100%); background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.7) 50%, rgba(255,255,255,0) 100%); animation: shimmer 1.4s infinite; }
+        @keyframes shimmer { 100% { transform: translateX(100%); } }
+        @keyframes fadeUp { from { opacity:0; transform: translateY(6px);} to { opacity:1; transform:none;} }
+        .fade-up { animation: fadeUp 0.35s ease both; }
+        @media (max-width: 1023px) {
+            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40; display: none; }
+            .sidebar-overlay.active { display: block; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen antialiased">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside id="sidebar" class="fixed top-0 left-0 z-50 h-screen w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-white flex flex-col transition-all duration-300 ease-in-out -translate-x-full lg:translate-x-0 shadow-2xl">
+        <div class="h-16 flex items-center justify-between px-5 border-b border-white/10 shrink-0">
+            <div class="flex items-center gap-3 overflow-hidden">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/25 shrink-0">
+                    <i data-lucide="printer" class="w-5 h-5"></i>
+                </div>
+                <div class="overflow-hidden">
+                    <h1 class="font-bold text-sm leading-tight truncate">Printer Analytics</h1>
+                    <p class="text-[10px] text-slate-400 truncate">Fleet Ops &amp; Intelligence</p>
+                </div>
+            </div>
+            <button onclick="toggleSidebar()" class="lg:hidden text-slate-400 hover:text-white p-1 rounded-lg" aria-label="Close menu">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <nav id="sidebar-nav-container" class="flex-1 overflow-y-auto sidebar-scroll py-4 px-3 space-y-1">
+            <div class="px-3 py-4 text-xs text-slate-500 animate-pulse flex items-center gap-2">
+                <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                <span>Loading menus...</span>
+            </div>
+        </nav>
+        <div class="p-3 border-t border-white/10 shrink-0 space-y-2">
+            <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>Database Live</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">v2.1</span>
+            </div>
+            <a href="/logout" class="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl bg-white/5 hover:bg-rose-600/80 text-slate-300 hover:text-white transition text-xs font-semibold border border-white/10">
+                <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                <span>Sign Out</span>
+            </a>
+        </div>
+    </aside>
+    <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+    <!-- ===== MAIN ===== -->
+    <div id="main-content" class="transition-all duration-300 ease-in-out lg:ml-64 min-h-screen flex flex-col">
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+            <div class="px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleSidebar()" class="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 transition flex items-center justify-center" aria-label="Toggle menu">
+                        <i data-lucide="menu" class="w-5 h-5"></i>
+                    </button>
+                    <nav class="hidden sm:flex items-center gap-2 text-xs text-slate-500">
+                        <a href="/menus/dashboard" class="hover:text-blue-600 transition font-medium">Dashboard</a>
+                        <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300"></i>
+                        <span>Product Intelligence</span>
+                        <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300"></i>
+                        <span class="font-semibold text-slate-800">Product Peak Period</span>
+                    </nav>
+                </div>
+                <div class="flex items-center gap-2.5">
+                    <span id="load-time-badge" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <i data-lucide="zap" class="w-3.5 h-3.5"></i><span id="load-time-text">Fast load</span>
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Module 01 · Live
+                    </span>
+                    <button id="refresh-btn" onclick="loadAllPeakData(true)" class="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 transition text-xs font-semibold flex items-center gap-1.5">
+                        <i id="refresh-icon" data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span class="hidden sm:inline">Refresh</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-[1600px] w-full mx-auto">
+            <div id="error-banner" class="hidden bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium rounded-2xl px-4 py-3 flex items-center gap-2"></div>
+
+            <!-- Page Title -->
+            <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4 fade-up">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shrink-0">
+                        <i data-lucide="flame" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">Module 01</span>
+                            <h2 class="text-xl font-extrabold text-slate-900">Product Peak Period &amp; Seasonality</h2>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1">Seasonal demand spikes, peak months, busiest weekdays and rush hours for printers, toner and supplies.</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shrink-0">
+                    <button id="btn-mode-qty" onclick="switchMetricMode('qty')" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition bg-blue-600 text-white shadow-sm">
+                        <i data-lucide="layers" class="w-3.5 h-3.5"></i><span>Units (Qty)</span>
+                    </button>
+                    <button id="btn-mode-amount" onclick="switchMetricMode('amount')" class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-800 transition">
+                        <i data-lucide="banknote" class="w-3.5 h-3.5"></i><span>Revenue (BDT)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 fade-up">
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-blue-500 shadow-sm">
+                    <div class="flex items-center justify-between"><p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Peak Month</p><i data-lucide="calendar" class="w-4 h-4 text-blue-500 shrink-0"></i></div>
+                    <h3 id="kpi-peak-month" class="text-xl font-extrabold text-slate-900 mt-2 truncate" title="">—</h3>
+                    <p class="text-[11px] text-slate-400 mt-1"><span id="kpi-peak-month-rev" class="text-emerald-600 font-semibold">—</span> <span>highest revenue</span></p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-emerald-500 shadow-sm">
+                    <div class="flex items-center justify-between"><p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Peak Weekday</p><i data-lucide="trending-up" class="w-4 h-4 text-emerald-500 shrink-0"></i></div>
+                    <h3 id="kpi-peak-day" class="text-xl font-extrabold text-slate-900 mt-2 truncate" title="">—</h3>
+                    <p class="text-[11px] text-slate-400 mt-1"><span id="kpi-peak-day-invoices" class="text-indigo-600 font-semibold">—</span> <span>busiest day</span></p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-amber-500 shadow-sm">
+                    <div class="flex items-center justify-between"><p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Peak Hour</p><i data-lucide="clock" class="w-4 h-4 text-amber-500 shrink-0"></i></div>
+                    <h3 id="kpi-peak-hour" class="text-xl font-extrabold text-slate-900 mt-2 truncate" title="">—</h3>
+                    <p class="text-[11px] text-slate-400 mt-1">Peak ordering window</p>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-violet-500 shadow-sm">
+                    <div class="flex items-center justify-between"><p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Peak Leader</p><i data-lucide="trophy" class="w-4 h-4 text-violet-500 shrink-0"></i></div>
+                    <h3 id="kpi-leader-name" class="text-base font-extrabold text-slate-900 mt-2 truncate" title="">—</h3>
+                    <p class="text-[11px] text-violet-600 font-semibold mt-1" id="kpi-leader-metric">—</p>
+                </div>
+            </div>
+
+            <!-- Timing Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 fade-up">
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                    <div class="flex items-center justify-between mb-4 gap-2">
+                        <div><h3 class="font-bold text-slate-900 text-sm">Sales by Day of Week</h3><p class="text-xs text-slate-500 mt-0.5">Weekly distribution — revenue vs invoices</p></div>
+                        <span class="text-xs font-semibold px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg shrink-0">Weekly</span>
+                    </div>
+                    <div class="h-64 relative"><canvas id="dayChart"></canvas></div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
+                    <div class="flex items-center justify-between mb-4 gap-2">
+                        <div><h3 class="font-bold text-slate-900 text-sm">Order Traffic by Hour</h3><p class="text-xs text-slate-500 mt-0.5">Invoices by hour of day</p></div>
+                        <span class="text-xs font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg shrink-0">Hourly</span>
+                    </div>
+                    <div class="h-64 relative"><canvas id="hourChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Product Explorer -->
+            <section id="explorer-section" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-5">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-100">
+                    <div class="max-w-2xl">
+                        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2"><i data-lucide="crosshair" class="w-5 h-5 text-blue-600"></i><span>Single Product Peak Explorer</span></h3>
+                        <p class="text-xs text-slate-500 mt-1">Pick any printer or consumable to inspect its seasonal spike and month-by-month history.</p>
+                    </div>
+                    <div class="w-full md:w-96 shrink-0">
+                        <label for="product-selector" class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Select Product</label>
+                        <div class="flex gap-2">
+                            <select id="product-selector" onchange="onProductSelect(this.value)" class="flex-1 min-w-0 text-xs font-semibold px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option value="">Loading catalog…</option>
+                            </select>
+                            <button onclick="loadProductDetail(document.getElementById('product-selector').value)" class="px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shrink-0">Load</button>
+                        </div>
+                        <p class="text-[10px] text-slate-400 mt-1">Only loads that product’s history — no full refresh.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="prod-detail-cards">
+                    <div class="p-4 rounded-2xl bg-blue-50/70 border border-blue-100">
+                        <p class="text-xs font-semibold text-blue-700" id="card-peak-title">Peak Month (Units)</p>
+                        <h4 class="text-lg font-extrabold text-blue-900 mt-1" id="detail-peak-month">—</h4>
+                        <p class="text-[11px] text-blue-600 mt-1" id="detail-peak-metric">—</p>
+                    </div>
+                    <div class="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100">
+                        <p class="text-xs font-semibold text-indigo-700" id="card-avg-title">Monthly Average (Units)</p>
+                        <h4 class="text-lg font-extrabold text-indigo-900 mt-1" id="detail-avg-metric">—</h4>
+                        <p class="text-[11px] text-indigo-600 mt-1">Normal run-rate</p>
+                    </div>
+                    <div class="p-4 rounded-2xl bg-amber-50/70 border border-amber-100">
+                        <p class="text-xs font-semibold text-amber-800">Peak Surge Rate</p>
+                        <h4 class="text-lg font-extrabold text-amber-900 mt-1" id="detail-surge-pct">—</h4>
+                        <p class="text-[11px] text-amber-700 mt-1">Spike over normal average</p>
+                    </div>
+                    <div class="p-4 rounded-2xl bg-emerald-50/70 border border-emerald-100">
+                        <p class="text-xs font-semibold text-emerald-700">Current Stock</p>
+                        <h4 class="text-lg font-extrabold text-emerald-900 mt-1" id="detail-current-stock">—</h4>
+                        <p class="text-[11px] text-emerald-600 mt-1" id="detail-stock-alert">—</p>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-3 gap-2">
+                        <h4 class="text-sm font-bold text-slate-800 flex items-center gap-1.5"><i data-lucide="line-chart" class="w-4 h-4 text-blue-600"></i><span id="selected-prod-chart-title">Monthly Sales Trend</span></h4>
+                        <span class="text-xs text-slate-400 font-mono shrink-0" id="selected-prod-id">—</span>
+                    </div>
+                    <div class="h-64 bg-slate-50/60 p-4 rounded-2xl border border-slate-100 relative"><canvas id="productDetailChart"></canvas></div>
+                </div>
+            </section>
+
+            <!-- Directory -->
+            <section id="directory-section" class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                <div class="p-5 border-b border-slate-100 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-base">Product Peak Demand Directory</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">Showing <span id="filtered-count" class="font-bold text-blue-600">0</span> of <span id="total-count" class="font-bold text-slate-800">0</span> products · Click a row to explore its seasonal curve.</p>
+                        </div>
+                        <button type="button" onclick="resetTableFilters()" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition shrink-0">Reset Filters</button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        <div class="relative">
+                            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none"></i>
+                            <input type="text" id="table-search" placeholder="Search name, ID or category…" autocomplete="off" class="w-full pl-9 pr-9 py-2 text-xs rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 font-medium">
+                            <button id="search-clear" onclick="document.getElementById('table-search').value=''; applyFilters()" class="hidden absolute right-2 top-1.5 p-1 rounded-lg hover:bg-slate-200 text-slate-400" aria-label="Clear search"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+                        </div>
+                        <select id="category-filter" class="py-2 px-3 text-xs rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"><option value="ALL">All Categories</option></select>
+                        <select id="activity-filter" class="py-2 px-3 text-xs rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"><option value="ALL">All Activity</option><option value="SOLD">Active Sellers Only</option><option value="ZERO">Zero Sales / Dead Stock</option></select>
+                        <select id="stock-filter" class="py-2 px-3 text-xs rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"><option value="ALL">All Stock Statuses</option><option value="In Stock">In Stock</option><option value="Low Stock">Low Stock</option><option value="Out of Stock">Out of Stock</option></select>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs sm:text-sm text-slate-600">
+                        <thead class="bg-slate-50 uppercase text-[11px] font-semibold text-slate-500 border-b border-slate-200/80 tracking-wider">
+                            <tr><th class="px-5 py-3.5">Product &amp; Category</th><th class="px-5 py-3.5 text-center">Peak Month</th><th class="px-5 py-3.5 text-right" id="th-peak-val">Peak Volume (Units)</th><th class="px-5 py-3.5 text-right" id="th-avg-val">Monthly Avg</th><th class="px-5 py-3.5 text-center">Surge Rate</th><th class="px-5 py-3.5 text-right">Current Stock</th><th class="px-5 py-3.5 text-center">Stock Status</th></tr>
+                        </thead>
+                        <tbody id="peak-table-tbody" class="divide-y divide-slate-100">
+                            <tr><td colspan="7" class="px-5 py-8"><div class="skeleton h-6 w-full mb-2"></div><div class="skeleton h-6 w-4/5 mb-2"></div><div class="skeleton h-6 w-3/5"></div></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                    <div>Page <span id="current-page-num" class="font-bold text-slate-800">1</span> of <span id="total-pages-num" class="font-bold text-slate-800">1</span> · <span id="page-range-label" class="text-slate-400"></span></div>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" id="btn-prev-page" onclick="changePage(-1)" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition">← Previous</button>
+                        <button type="button" id="btn-next-page" onclick="changePage(1)" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition">Next →</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="text-center py-5 text-xs text-slate-400 border-t border-slate-200 bg-white">
+            Printer Analytics Dashboard · <strong>Module 01: Product Peak Period Analytics</strong>
+        </footer>
+    </div>
+
+    <script>
+        // ---------- Sidebar ----------
+        let isSidebarCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
+        function applySidebarState() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (window.innerWidth >= 1024) {
+                overlay.classList.remove('active');
+                if (isSidebarCollapsed) {
+                    sidebar.classList.add('lg:-translate-x-full'); sidebar.classList.remove('lg:translate-x-0');
+                    mainContent.classList.remove('lg:ml-64'); mainContent.classList.add('lg:ml-0');
+                } else {
+                    sidebar.classList.remove('lg:-translate-x-full'); sidebar.classList.add('lg:translate-x-0');
+                    mainContent.classList.add('lg:ml-64'); mainContent.classList.remove('lg:ml-0');
+                }
+            } else {
+                mainContent.classList.remove('lg:ml-0'); mainContent.classList.add('lg:ml-64');
+                if (isSidebarCollapsed) {
+                    sidebar.classList.remove('translate-x-0'); sidebar.classList.add('-translate-x-full'); overlay.classList.remove('active');
+                } else {
+                    sidebar.classList.add('translate-x-0'); sidebar.classList.remove('-translate-x-full'); overlay.classList.add('active');
+                }
+            }
+        }
+        function toggleSidebar() { isSidebarCollapsed = !isSidebarCollapsed; localStorage.setItem('sidebar_collapsed', isSidebarCollapsed); applySidebarState(); }
+        applySidebarState();
+
+        async function loadSidebarMenus() {
+            try {
+                const res = await fetch('/api/menus');
+                const menus = await res.json();
+                renderSidebarNav(menus);
+            } catch (err) { console.error('Failed to load sidebar menus:', err); }
+        }
+        function renderSidebarNav(menus) {
+            const container = document.getElementById('sidebar-nav-container');
+            if (!container) return;
+            if (!menus || menus.length === 0) { container.innerHTML = '<div class="p-4 text-xs text-slate-500 text-center">No menus found</div>'; return; }
+            const sections = {};
+            menus.forEach(m => { const sec = m.section || 'General'; if (!sections[sec]) sections[sec] = []; sections[sec].push(m); });
+            let html = '';
+            const currentPath = window.location.pathname;
+            for (const [secTitle, items] of Object.entries(sections)) {
+                html += `<p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mt-4 mb-2 first:mt-1">${esc(secTitle)}</p>`;
+                items.forEach((m, idx) => {
+                    const hasSubmenus = m.submenus && m.submenus.length > 0;
+                    const menuId = `menu-tree-${m.id || idx}`;
+                    const isAnyChildActive = hasSubmenus && m.submenus.some(s => s.url === currentPath);
+                    const isDirectActive = !hasSubmenus && currentPath === m.url;
+                    if (hasSubmenus) {
+                        html += `
+                            <div class="menu-treeview-group">
+                                <button type="button" onclick="toggleSubmenu('${menuId}')" class="sidebar-nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium ${isAnyChildActive ? 'text-white bg-white/10' : 'text-slate-300 hover:text-white'} transition group">
+                                    <div class="flex items-center gap-3 overflow-hidden">
+                                        <div class="w-8 h-8 rounded-lg ${isAnyChildActive ? 'bg-blue-600 shadow-sm text-white' : 'bg-slate-800 text-slate-400 group-hover:text-white'} flex items-center justify-center shrink-0"><i data-lucide="${esc(m.icon || 'folder')}" class="w-4 h-4"></i></div>
+                                        <div class="overflow-hidden text-left"><span class="block truncate ${isAnyChildActive ? 'font-bold text-white' : 'font-medium'} text-xs">${esc(m.title)}</span>${m.subtitle ? `<span class="text-[10px] text-slate-500 block truncate">${esc(m.subtitle)}</span>` : ''}</div>
+                                    </div>
+                                    <i id="${menuId}-arrow" data-lucide="chevron-right" class="w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isAnyChildActive ? 'rotate-90 text-blue-400' : ''}"></i>
+                                </button>
+                                <div id="${menuId}-submenu" class="space-y-1 pl-4 pr-1 mt-1 border-l-2 border-slate-800 ml-4 ${isAnyChildActive ? '' : 'hidden'}">
+                                    ${m.submenus.map(sub => {
+                                        const isSubActive = currentPath === sub.url;
+                                        const isSubDisabled = sub.is_disabled === 1;
+                                        const subActiveStyle = isSubActive ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white hover:bg-white/5';
+                                        if (isSubDisabled) return `<div class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-500 cursor-not-allowed opacity-60"><i data-lucide="${esc(sub.icon || 'circle')}" class="w-2.5 h-2.5 text-slate-600 shrink-0"></i><span class="truncate">${esc(sub.title)}</span></div>`;
+                                        return `<a href="${esc(sub.url)}" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition ${subActiveStyle}"><i data-lucide="${esc(sub.icon || 'circle')}" class="w-2.5 h-2.5 ${isSubActive ? 'text-white fill-white' : 'text-slate-400'} shrink-0"></i><span class="truncate">${esc(sub.title)}</span></a>`;
+                                    }).join('')}
+                                </div>
+                            </div>`;
+                    } else {
+                        const activeClass = isDirectActive ? 'active bg-blue-600/25 border-r-3 border-blue-500 text-white font-bold' : 'text-slate-400 hover:text-white';
+                        const iconBg = isDirectActive ? 'bg-blue-600 shadow-sm text-white' : 'bg-slate-800 text-slate-400';
+                        html += `<a href="${esc(m.url)}" class="sidebar-nav-item ${activeClass} flex items-center px-3 py-2.5 rounded-lg text-sm font-medium ${m.is_disabled === 1 ? 'cursor-not-allowed opacity-60' : ''}"><div class="flex items-center gap-3 overflow-hidden"><div class="w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center shrink-0"><i data-lucide="${esc(m.icon || 'circle')}" class="w-4 h-4"></i></div><div class="overflow-hidden"><span class="block truncate ${isDirectActive ? 'text-white font-bold' : 'text-slate-300'} text-xs">${esc(m.title)}</span></div></div></a>`;
+                    }
+                });
+            }
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+        function toggleSubmenu(menuId) {
+            const submenu = document.getElementById(`${menuId}-submenu`);
+            const arrow = document.getElementById(`${menuId}-arrow`);
+            if (!submenu) return;
+            if (!submenu.classList.contains('hidden')) { submenu.classList.add('hidden'); if (arrow) arrow.classList.remove('rotate-90','text-blue-400'); }
+            else { submenu.classList.remove('hidden'); if (arrow) arrow.classList.add('rotate-90','text-blue-400'); }
+        }
+
+        // ---------- Peak data ----------
+        let currentMode = 'qty';
+        let dayChartInstance = null, hourChartInstance = null, productDetailChartInstance = null;
+        let allRankingData = [], filteredRankingData = [];
+        let cachedRankingData = [], cachedCurrentProductDetail = null;
+        let currentPage = 1;
+        const pageSize = 30;
+        const detailCache = new Map();
+        let detailAbort = null, searchTimer = null;
+
+        function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+        function formatBDT(amount) {
+            amount = amount || 0;
+            if (amount >= 10000000) return '৳' + (amount / 10000000).toFixed(2) + ' Cr';
+            if (amount >= 100000) return '৳' + (amount / 100000).toFixed(2) + ' Lakh';
+            return '৳' + Math.round(amount).toLocaleString('en-US');
+        }
+        function showError(msg) {
+            const b = document.getElementById('error-banner');
+            b.innerHTML = `<i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i><span>${esc(msg)}</span>`;
+            b.classList.remove('hidden'); lucide.createIcons();
+        }
+        function hideError() { document.getElementById('error-banner').classList.add('hidden'); }
+
+        function switchMetricMode(mode) {
+            currentMode = mode;
+            const btnQty = document.getElementById('btn-mode-qty');
+            const btnAmount = document.getElementById('btn-mode-amount');
+            if (mode === 'qty') {
+                btnQty.className = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition bg-blue-600 text-white shadow-sm';
+                btnAmount.className = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-800 transition';
+                document.getElementById('th-peak-val').innerText = 'Peak Volume (Units)';
+                document.getElementById('th-avg-val').innerText = 'Monthly Avg';
+                document.getElementById('card-peak-title').innerText = 'Peak Month (Units)';
+                document.getElementById('card-avg-title').innerText = 'Monthly Average (Units)';
+            } else {
+                btnAmount.className = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition bg-blue-600 text-white shadow-sm';
+                btnQty.className = 'flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-800 transition';
+                document.getElementById('th-peak-val').innerText = 'Peak Revenue (BDT)';
+                document.getElementById('th-avg-val').innerText = 'Monthly Avg';
+                document.getElementById('card-peak-title').innerText = 'Peak Month (Revenue)';
+                document.getElementById('card-avg-title').innerText = 'Monthly Average (Revenue)';
+            }
+            updateProductDetailUI();
+            renderCurrentPage();
+        }
+
+        async function loadAllPeakData(force = false) {
+            hideError();
+            const btn = document.getElementById('refresh-btn');
+            const icon = document.getElementById('refresh-icon');
+            if (icon) icon.classList.add('animate-spin');
+            if (btn) btn.disabled = true;
+            const t0 = performance.now();
+            try {
+                // ONE fast request instead of 4 parallel heavy ones
+                const res = await fetch('/api/peak/bootstrap?limit=1500');
+                if (!res.ok) throw new Error('Server returned ' + res.status);
+                const boot = await res.json();
+                const timing = boot.timing || {};
+                const ranking = boot.ranking || [];
+                const productsList = boot.products || [];
+                const categories = boot.categories || [];
+
+                allRankingData = ranking; cachedRankingData = ranking;
+                document.getElementById('total-count').innerText = allRankingData.length;
+
+                const catFilter = document.getElementById('category-filter');
+                if (catFilter) catFilter.innerHTML = '<option value="ALL">All Categories</option>' + categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+
+                if (timing.peak_month) {
+                    const pm = document.getElementById('kpi-peak-month');
+                    pm.innerText = timing.peak_month.month_label || '—'; pm.title = timing.peak_month.month_label || '';
+                    document.getElementById('kpi-peak-month-rev').innerText = formatBDT(timing.peak_month.revenue);
+                }
+                if (timing.peak_day) {
+                    const pd = document.getElementById('kpi-peak-day');
+                    pd.innerText = timing.peak_day.day_name || '—'; pd.title = timing.peak_day.day_name || '';
+                    document.getElementById('kpi-peak-day-invoices').innerText = (timing.peak_day.invoices || 0).toLocaleString('en-US') + ' invoices';
+                }
+                if (timing.peak_hour) {
+                    const ph = document.getElementById('kpi-peak-hour');
+                    ph.innerText = timing.peak_hour.hr_label || '—'; ph.title = timing.peak_hour.hr_label || '';
+                }
+                if (ranking.length > 0) {
+                    const top = ranking[0];
+                    const ln = document.getElementById('kpi-leader-name');
+                    ln.innerText = top.product_name || '—'; ln.title = top.product_name || '';
+                    document.getElementById('kpi-leader-metric').innerText = `${(top.peak_qty_val || 0).toLocaleString('en-US')} units in peak month (${top.peak_qty_month_label || ''})`;
+                }
+
+                renderDayChart(timing.day_distribution || []);
+                renderHourChart(timing.hour_distribution || []);
+                populateProductDropdown(productsList);
+                applyFilters();
+
+                const ms = Math.round(performance.now() - t0);
+                document.getElementById('load-time-text').textContent = `Loaded in ${(ms/1000).toFixed(1)}s`;
+
+                if (ranking.length > 0) {
+                    const sel = document.getElementById('product-selector');
+                    if (sel) sel.value = ranking[0].product_id;
+                    await loadProductDetail(ranking[0].product_id);
+                }
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Error loading peak analytics data:', err);
+                showError('Could not load peak-period data. Check the database connection, then try Refresh.');
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function renderDayChart(days) {
+            const el = document.getElementById('dayChart');
+            if (!el || typeof Chart === 'undefined') return;
+            if (!days || !days.length) { el.parentElement.innerHTML = '<p class="text-xs text-slate-400 text-center py-16">No weekly data available.</p>'; return; }
+            if (dayChartInstance) dayChartInstance.destroy();
+            dayChartInstance = new Chart(el.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: days.map(d => d.day_name),
+                    datasets: [
+                        { label: 'Revenue (Cr BDT)', data: days.map(d => (d.revenue / 10000000).toFixed(2)), backgroundColor: '#2563eb', borderRadius: 6, yAxisID: 'y' },
+                        { label: 'Invoices', data: days.map(d => d.invoices), borderColor: '#10b981', backgroundColor: '#10b981', borderWidth: 2, type: 'line', pointRadius: 4, yAxisID: 'y1' }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, position: 'left', grid: { color: '#f8fafc' }, ticks: { font: { size: 10 } }, title: { display: true, text: 'Crore ৳', font: { size: 10 } } },
+                              y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { font: { size: 10 } }, title: { display: true, text: 'Invoices', font: { size: 10 } } },
+                              x: { grid: { display: false }, ticks: { font: { size: 11, weight: '600' } } } },
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } } }
+            });
+        }
+
+        function renderHourChart(hours) {
+            const el = document.getElementById('hourChart');
+            if (!el || typeof Chart === 'undefined') return;
+            if (!hours || !hours.length) { el.parentElement.innerHTML = '<p class="text-xs text-slate-400 text-center py-16">No hourly data available.</p>'; return; }
+            if (hourChartInstance) hourChartInstance.destroy();
+            hourChartInstance = new Chart(el.getContext('2d'), {
+                type: 'line',
+                data: { labels: hours.map(h => h.hr_label), datasets: [{ label: 'Invoices', data: hours.map(h => h.invoices), borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.35, borderWidth: 2.5, pointRadius: 4, pointBackgroundColor: '#f59e0b' }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, grid: { color: '#f8fafc' }, ticks: { font: { size: 10 } } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } },
+                    plugins: { legend: { display: false } } }
+            });
+        }
+
+        function populateProductDropdown(products) {
+            const select = document.getElementById('product-selector');
+            if (!select) return;
+            select.innerHTML = products.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.category)})</option>`).join('');
+        }
+
+        async function onProductSelect(productId) { if (!productId) return; await loadProductDetail(productId); }
+
+        async function loadProductDetail(productId) {
+            if (!productId) return;
+            if (detailAbort) detailAbort.abort();
+            detailAbort = new AbortController();
+            if (detailCache.has(productId)) { cachedCurrentProductDetail = detailCache.get(productId); updateProductDetailUI(); return; }
+            document.getElementById('detail-peak-month').innerText = '…';
+            document.getElementById('detail-peak-metric').innerText = 'Loading…';
+            try {
+                const res = await fetch(`/api/product-peak-detail/${encodeURIComponent(productId)}`, { signal: detailAbort.signal });
+                if (!res.ok) throw new Error('Server returned ' + res.status);
+                const data = await res.json();
+                if (!data || !data.product_id) return;
+                detailCache.set(productId, data);
+                cachedCurrentProductDetail = data;
+                updateProductDetailUI();
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                console.error('Error loading product detail:', err);
+                document.getElementById('detail-peak-metric').innerText = 'Failed to load.';
+            }
+        }
+
+        function updateProductDetailUI() {
+            const data = cachedCurrentProductDetail;
+            if (!data) return;
+            const modeLabel = currentMode === 'qty' ? 'Units' : 'Revenue';
+            document.getElementById('selected-prod-chart-title').innerText = `${data.product_name} — Monthly Trend (${modeLabel})`;
+            document.getElementById('selected-prod-id').innerText = `ID: ${data.product_id}`;
+            if (currentMode === 'qty') {
+                document.getElementById('detail-peak-month').innerText = data.peak_qty_month || '—';
+                document.getElementById('detail-peak-metric').innerText = `${(data.peak_qty || 0).toLocaleString('en-US')} units sold`;
+                document.getElementById('detail-avg-metric').innerText = `${Math.round(data.avg_monthly_qty || 0).toLocaleString('en-US')} units`;
+                document.getElementById('detail-surge-pct').innerText = `+${data.surge_qty_pct}%`;
+            } else {
+                document.getElementById('detail-peak-month').innerText = data.peak_sales_month || '—';
+                document.getElementById('detail-peak-metric').innerText = formatBDT(data.peak_sales);
+                document.getElementById('detail-avg-metric').innerText = formatBDT(data.avg_monthly_sales);
+                document.getElementById('detail-surge-pct').innerText = `+${data.surge_sales_pct}%`;
+            }
+            document.getElementById('detail-current-stock').innerText = `${(data.current_stock || 0).toLocaleString('en-US')} units`;
+            const alertEl = document.getElementById('detail-stock-alert');
+            if ((data.current_stock || 0) === 0) { alertEl.innerText = 'Out of Stock!'; alertEl.className = 'text-[11px] text-rose-600 font-bold mt-1'; }
+            else if (data.current_stock < (data.peak_qty || 0) * 0.3) { alertEl.innerText = 'Low Stock Alert!'; alertEl.className = 'text-[11px] text-amber-600 font-bold mt-1'; }
+            else { alertEl.innerText = 'Healthy Stock Level'; alertEl.className = 'text-[11px] text-emerald-600 font-medium mt-1'; }
+            renderProductDetailChart(data.monthly_history || []);
+        }
+
+        function renderProductDetailChart(history) {
+            const el = document.getElementById('productDetailChart');
+            if (!el || typeof Chart === 'undefined') return;
+            if (!history.length) { el.parentElement.innerHTML = '<p class="text-xs text-slate-400 text-center py-16">No monthly history for this product.</p>'; return; }
+            const datasetValues = currentMode === 'qty' ? history.map(h => h.qty) : history.map(h => h.sales);
+            const datasetLabel = currentMode === 'qty' ? 'Units Sold' : 'Revenue (BDT)';
+            const barColor = currentMode === 'qty' ? '#3b82f6' : '#10b981';
+            const hoverColor = currentMode === 'qty' ? '#1d4ed8' : '#059669';
+            if (productDetailChartInstance) productDetailChartInstance.destroy();
+            productDetailChartInstance = new Chart(el.getContext('2d'), {
+                type: 'bar',
+                data: { labels: history.map(h => h.month_label), datasets: [{ label: datasetLabel, data: datasetValues, backgroundColor: barColor, hoverBackgroundColor: hoverColor, borderRadius: 6 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, grid: { color: '#e2e8f0' }, ticks: { font: { size: 10 }, callback: function(val) { return currentMode === 'qty' ? val.toLocaleString() : (val >= 1000000 ? (val/1000000).toFixed(1) + 'M' : val.toLocaleString()); } } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => currentMode === 'qty' ? `Units: ${ctx.parsed.y.toLocaleString()} pcs` : `Revenue: ৳${Math.round(ctx.parsed.y).toLocaleString()}` } } } }
+            });
+        }
+
+        function applyFilters() {
+            const query = (document.getElementById('table-search')?.value || '').toLowerCase().trim();
+            const cat = document.getElementById('category-filter')?.value || 'ALL';
+            const activity = document.getElementById('activity-filter')?.value || 'ALL';
+            const stock = document.getElementById('stock-filter')?.value || 'ALL';
+            document.getElementById('search-clear').classList.toggle('hidden', !query);
+            filteredRankingData = allRankingData.filter(item => {
+                if (query) {
+                    const q = query;
+                    if (!((item.product_name || '').toLowerCase().includes(q) || (item.product_id || '').toLowerCase().includes(q) || (item.category_name || '').toLowerCase().includes(q))) return false;
+                }
+                if (cat !== 'ALL' && item.category_name !== cat) return false;
+                if (activity === 'SOLD' && (!item.total_qty_sold || item.total_qty_sold <= 0)) return false;
+                if (activity === 'ZERO' && item.total_qty_sold > 0) return false;
+                if (stock !== 'ALL' && item.stock_status !== stock) return false;
+                return true;
+            });
+            currentPage = 1;
+            renderCurrentPage();
+        }
+
+        function resetTableFilters() {
+            document.getElementById('table-search').value = '';
+            document.getElementById('category-filter').value = 'ALL';
+            document.getElementById('activity-filter').value = 'ALL';
+            document.getElementById('stock-filter').value = 'ALL';
+            applyFilters();
+        }
+
+        function changePage(direction) {
+            const totalPages = Math.ceil(filteredRankingData.length / pageSize) || 1;
+            const targetPage = currentPage + direction;
+            if (targetPage >= 1 && targetPage <= totalPages) { currentPage = targetPage; renderCurrentPage(); }
+        }
+
+        function renderCurrentPage() {
+            const tbody = document.getElementById('peak-table-tbody');
+            if (!tbody) return;
+            const total = filteredRankingData.length;
+            document.getElementById('filtered-count').innerText = total;
+            const totalPages = Math.ceil(total / pageSize) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+            document.getElementById('current-page-num').innerText = currentPage;
+            document.getElementById('total-pages-num').innerText = totalPages;
+            document.getElementById('btn-prev-page').disabled = currentPage <= 1;
+            document.getElementById('btn-next-page').disabled = currentPage >= totalPages;
+            if (!total) {
+                tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-slate-400">No matching products found. Try adjusting your search or filters.</td></tr>';
+                document.getElementById('page-range-label').innerText = '';
+                return;
+            }
+            const startIdx = (currentPage - 1) * pageSize;
+            const items = filteredRankingData.slice(startIdx, startIdx + pageSize);
+            document.getElementById('page-range-label').innerText = `${startIdx + 1}–${Math.min(startIdx + pageSize, total)} of ${total}`;
+            tbody.innerHTML = items.map((p) => {
+                let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+                if (p.stock_status === 'In Stock') badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                else if (p.stock_status === 'Low Stock') badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+                else if (p.stock_status === 'Out of Stock') badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+                const hasSales = p.total_qty_sold > 0;
+                const peakMonthLabel = hasSales ? (currentMode === 'qty' ? (p.peak_qty_month_label || '-') : (p.peak_sales_month_label || '-')) : '-';
+                const peakValDisplay = hasSales ? (currentMode === 'qty' ? (p.peak_qty_val.toLocaleString() + ' pcs') : formatBDT(p.peak_sales_val)) : '0';
+                const avgValDisplay = hasSales ? (currentMode === 'qty' ? (Math.round(p.avg_monthly_qty).toLocaleString() + ' pcs') : formatBDT(p.avg_monthly_sales)) : '0';
+                const surgeVal = hasSales ? (currentMode === 'qty' ? p.surge_qty_pct : p.surge_sales_pct) : null;
+                return `
+                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="selectAndScrollProduct('${esc(p.product_id)}')">
+                        <td class="px-5 py-3.5"><div class="font-bold text-slate-900 leading-snug">${esc(p.product_name)}</div><div class="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5"><span class="font-mono text-blue-600 font-semibold">${esc(p.product_id)}</span><span>·</span><span>${esc(p.category_name)}</span></div></td>
+                        <td class="px-5 py-3.5 text-center">${hasSales ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 font-mono">${esc(peakMonthLabel)}</span>` : '<span class="text-slate-300 font-mono">-</span>'}</td>
+                        <td class="px-5 py-3.5 text-right font-extrabold text-slate-900">${esc(peakValDisplay)}</td>
+                        <td class="px-5 py-3.5 text-right text-slate-600 font-medium">${esc(avgValDisplay)}</td>
+                        <td class="px-5 py-3.5 text-center">${surgeVal !== null ? `<span class="font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded text-xs">+${surgeVal}%</span>` : '<span class="text-slate-300 font-mono">-</span>'}</td>
+                        <td class="px-5 py-3.5 text-right font-bold ${(p.current_stock || 0) === 0 ? 'text-rose-600' : 'text-slate-800'}">${(p.current_stock || 0).toLocaleString()}</td>
+                        <td class="px-5 py-3.5 text-center"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${badgeClass}">${esc(p.stock_status)}</span></td>
+                    </tr>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        function selectAndScrollProduct(productId) {
+            const select = document.getElementById('product-selector');
+            if (select) select.value = productId;
+            loadProductDetail(productId);
+            document.getElementById('explorer-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        ['category-filter','activity-filter','stock-filter'].forEach(id => document.getElementById(id).addEventListener('change', applyFilters));
+        document.getElementById('table-search').addEventListener('input', (e) => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(applyFilters, 120);
+        });
+
+        loadSidebarMenus();
+        loadAllPeakData();
+    </script>
+</body>
+</html>

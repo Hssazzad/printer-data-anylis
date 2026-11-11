@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submenu Management - Printer Analytics</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        .sidebar-nav-item { transition: all 0.15s ease; }
+        .sidebar-nav-item:hover { background: rgba(255,255,255,0.08); padding-left: 1.25rem; }
+        .sidebar-nav-item.active { background: rgba(59, 130, 246, 0.25); border-right: 3px solid #3b82f6; }
+        @media (max-width: 1023px) {
+            .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40; display: none; }
+            .sidebar-overlay.active { display: block; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen antialiased">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside id="sidebar" class="fixed top-0 left-0 z-50 h-screen w-64 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-white flex flex-col transition-all duration-300 ease-in-out -translate-x-full lg:translate-x-0 shadow-2xl">
+        <div class="h-16 flex items-center justify-between px-5 border-b border-white/10 shrink-0">
+            <div class="flex items-center gap-3 overflow-hidden">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/25 shrink-0">
+                    <i data-lucide="printer" class="w-4.5 h-4.5"></i>
+                </div>
+                <div class="overflow-hidden">
+                    <h1 class="font-bold text-sm leading-tight truncate">Printer Analytics</h1>
+                    <p class="text-[10px] text-slate-400 truncate">Fleet Ops & Intelligence</p>
+                </div>
+            </div>
+            <button onclick="toggleSidebar()" class="lg:hidden text-slate-400 hover:text-white p-1 rounded-lg">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <nav id="sidebar-nav-container" class="flex-1 overflow-y-auto sidebar-scroll py-4 px-3 space-y-1">
+            <div class="px-3 py-4 text-xs text-slate-500 animate-pulse flex items-center gap-2">
+                <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                <span>Loading menus...</span>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-white/10 shrink-0">
+            <div class="flex items-center justify-between text-[11px] text-slate-400">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>Database Menus</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">v2.1</span>
+            </div>
+        </div>
+    </aside>
+
+    <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+    <!-- ===== MAIN CONTENT WRAPPER ===== -->
+    <div id="main-content" class="transition-all duration-300 ease-in-out lg:ml-64 min-h-screen flex flex-col">
+
+        <!-- Top Navbar -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+            <div class="px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <button id="sidebar-toggle-btn" onclick="toggleSidebar()" class="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-700 transition flex items-center justify-center shadow-xs">
+                        <i data-lucide="menu" class="w-5 h-5"></i>
+                    </button>
+                    <nav class="hidden sm:flex items-center gap-2 text-xs text-slate-500">
+                        <a href="/" class="hover:text-blue-600 transition">Dashboard</a>
+                        <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300"></i>
+                        <span class="text-slate-400">Menus</span>
+                        <i data-lucide="chevron-right" class="w-3 h-3 text-slate-300"></i>
+                        <span class="font-semibold text-slate-800">Submenu List</span>
+                    </nav>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="/menus/main" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition">
+                        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+                        <span>Go to Main Menu List</span>
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- Page Body -->
+        <main class="flex-1 p-4 sm:p-6 lg:p-8 space-y-6">
+
+            <!-- Title Card -->
+            <div class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5">
+                    <div class="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20">
+                        <i data-lucide="corner-down-right" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-extrabold text-slate-900">Submenu List &amp; Management</h2>
+                        <p class="text-xs text-slate-500">Create, edit, reorder, and assign nested submenus under any parent main menu</p>
+                    </div>
+                </div>
+                <a href="#form-container" class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                    <span>Add New Submenu</span>
+                </a>
+            </div>
+
+            <!-- Form Card -->
+            <div id="form-container" class="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
+                <div class="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
+                    <h3 id="form-title" class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="plus-circle" class="w-4 h-4 text-indigo-600"></i>
+                        <span>Add New Submenu</span>
+                    </h3>
+                    <button type="button" onclick="resetForm()" class="text-xs text-slate-500 hover:text-slate-800 underline font-medium">Reset Form</button>
+                </div>
+
+                <form onsubmit="handleFormSubmit(event)" class="space-y-4">
+                    <input type="hidden" id="menu-id" value="">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Parent Main Menu *</label>
+                            <select id="sub-parent-id" required class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-800">
+                                <option value="">Loading main menus...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Submenu Title *</label>
+                            <input type="text" id="menu-title" required placeholder="e.g. Sales Forecast" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">URL / Route *</label>
+                            <input type="text" id="menu-url" required placeholder="/ or /sales or #" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Icon Name</label>
+                            <input type="text" id="menu-icon" value="circle" placeholder="circle, file-text, bar-chart" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Menu Order (Sort)</label>
+                            <input type="number" id="menu-order" value="1" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Section</label>
+                            <input type="text" id="menu-section" value="Analytics Modules" class="w-full text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
+                        <div class="flex items-center gap-5 text-xs text-slate-700">
+                            <label class="flex items-center gap-2 cursor-pointer font-medium">
+                                <input type="checkbox" id="menu-disabled" class="rounded text-indigo-600 focus:ring-indigo-500">
+                                <span>Mark as Coming Soon (Disabled)</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer font-medium">
+                                <input type="checkbox" id="menu-active" checked class="rounded text-indigo-600 focus:ring-indigo-500">
+                                <span>Active (Show in Sidebar)</span>
+                            </label>
+                        </div>
+                        <button type="submit" id="submit-btn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">
+                            <i data-lucide="check" class="w-4 h-4"></i>
+                            <span id="submit-btn-text">Save Submenu</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Submenus Table Card -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-sm">All Registered Submenus</h3>
+                        <p class="text-xs text-slate-500">Submenus grouped under their respective main menus</p>
+                    </div>
+                    <span id="sub-menu-count" class="text-xs font-bold px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg">0 Submenus</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs sm:text-sm text-slate-600">
+                        <thead class="bg-slate-50 uppercase text-[11px] font-semibold text-slate-500 border-b border-slate-200/80">
+                            <tr>
+                                <th class="px-5 py-3.5 text-center">Order</th>
+                                <th class="px-5 py-3.5">Parent Main Menu</th>
+                                <th class="px-5 py-3.5">Submenu Title</th>
+                                <th class="px-5 py-3.5">URL / Route</th>
+                                <th class="px-5 py-3.5 text-center">Status</th>
+                                <th class="px-5 py-3.5 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sub-menu-tbody" class="divide-y divide-slate-100">
+                            <tr><td colspan="6" class="px-5 py-8 text-center text-slate-400">Loading submenus...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </main>
+
+        <footer class="text-center py-5 text-xs text-slate-400 border-t border-slate-200 bg-white">
+            Printer Analytics Dashboard &bull; <strong>Submenu Management</strong>
+        </footer>
+    </div>
+
+    <script>
+        // Sidebar Toggle
+        let isSidebarCollapsed = localStorage.getItem('sidebar_collapsed') === 'true';
+        function applySidebarState() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (window.innerWidth >= 1024) {
+                overlay.classList.remove('active');
+                if (isSidebarCollapsed) {
+                    sidebar.classList.add('lg:-translate-x-full');
+                    sidebar.classList.remove('lg:translate-x-0');
+                    mainContent.classList.remove('lg:ml-64');
+                    mainContent.classList.add('lg:ml-0');
+                } else {
+                    sidebar.classList.remove('lg:-translate-x-full');
+                    sidebar.classList.add('lg:translate-x-0');
+                    mainContent.classList.add('lg:ml-64');
+                    mainContent.classList.remove('lg:ml-0');
+                }
+            } else {
+                mainContent.classList.remove('lg:ml-0');
+                mainContent.classList.add('lg:ml-64');
+                if (isSidebarCollapsed) {
+                    sidebar.classList.remove('translate-x-0');
+                    sidebar.classList.add('-translate-x-full');
+                    overlay.classList.remove('active');
+                } else {
+                    sidebar.classList.add('translate-x-0');
+                    sidebar.classList.remove('-translate-x-full');
+                    overlay.classList.add('active');
+                }
+            }
+        }
+        function toggleSidebar() {
+            isSidebarCollapsed = !isSidebarCollapsed;
+            localStorage.setItem('sidebar_collapsed', isSidebarCollapsed);
+            applySidebarState();
+        }
+        applySidebarState();
+
+        // Load Sidebar Navigation Dynamically
+        async function loadSidebarMenus() {
+            try {
+                const res = await fetch('/api/menus');
+                const menus = await res.json();
+                renderSidebarNav(menus);
+            } catch (err) {
+                console.error("Failed to load sidebar menus:", err);
+            }
+        }
+
+        function renderSidebarNav(menus) {
+            const container = document.getElementById('sidebar-nav-container');
+            if (!container) return;
+            const sections = {};
+            menus.forEach(m => {
+                const sec = m.section || 'General';
+                if (!sections[sec]) sections[sec] = [];
+                sections[sec].push(m);
+            });
+
+            let html = '';
+            const currentPath = window.location.pathname;
+
+            for (const [secTitle, items] of Object.entries(sections)) {
+                html += `<p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 mt-4 mb-2 first:mt-1">${secTitle}</p>`;
+                items.forEach((m, idx) => {
+                    const hasSubmenus = m.submenus && m.submenus.length > 0;
+                    const menuId = `menu-tree-${m.id || idx}`;
+                    const isAnyChildActive = hasSubmenus && m.submenus.some(s => s.url === currentPath);
+                    const isDirectActive = !hasSubmenus && currentPath === m.url;
+
+                    if (hasSubmenus) {
+                        html += `
+                            <div class="menu-treeview-group">
+                                <button type="button" onclick="toggleSubmenu('${menuId}')" class="sidebar-nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium ${isAnyChildActive ? 'text-white bg-white/10' : 'text-slate-300 hover:text-white'} transition group">
+                                    <div class="flex items-center gap-3 overflow-hidden">
+                                        <div class="w-8 h-8 rounded-lg ${isAnyChildActive ? 'bg-blue-600 shadow-sm text-white' : 'bg-slate-800 text-slate-400 group-hover:text-white'} flex items-center justify-center shrink-0">
+                                            <i data-lucide="${m.icon || 'folder'}" class="w-4 h-4"></i>
+                                        </div>
+                                        <div class="overflow-hidden text-left">
+                                            <span class="block truncate ${isAnyChildActive ? 'font-bold text-white' : 'font-medium'} text-xs">${m.title}</span>
+                                        </div>
+                                    </div>
+                                    <i id="${menuId}-arrow" data-lucide="chevron-right" class="w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isAnyChildActive ? 'rotate-90 text-blue-400' : ''}"></i>
+                                </button>
+                                <div id="${menuId}-submenu" class="space-y-1 pl-4 pr-1 mt-1 border-l-2 border-slate-800 ml-4.5 ${isAnyChildActive ? '' : 'hidden'}">
+                                    ${m.submenus.map(sub => {
+                                        const isSubActive = currentPath === sub.url;
+                                        const subActiveStyle = isSubActive ? 'bg-blue-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-white hover:bg-white/5';
+                                        return `
+                                            <a href="${sub.url}" class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition ${subActiveStyle}">
+                                                <i data-lucide="${sub.icon || 'circle'}" class="w-2.5 h-2.5 ${isSubActive ? 'text-white fill-white' : 'text-slate-400'} shrink-0"></i>
+                                                <span class="truncate">${sub.title}</span>
+                                            </a>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        const activeClass = isDirectActive ? 'active bg-blue-600/25 border-r-3 border-blue-500 text-white font-bold' : 'text-slate-400 hover:text-white';
+                        html += `
+                            <a href="${m.url}" class="sidebar-nav-item ${activeClass} flex items-center px-3 py-2.5 rounded-lg text-sm font-medium">
+                                <div class="flex items-center gap-3 overflow-hidden">
+                                    <div class="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0">
+                                        <i data-lucide="${m.icon || 'circle'}" class="w-4 h-4"></i>
+                                    </div>
+                                    <span class="block truncate text-xs">${m.title}</span>
+                                </div>
+                            </a>
+                        `;
+                    }
+                });
+            }
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function toggleSubmenu(menuId) {
+            const submenu = document.getElementById(`${menuId}-submenu`);
+            const arrow = document.getElementById(`${menuId}-arrow`);
+            if (!submenu) return;
+            const isCurrentlyOpen = !submenu.classList.contains('hidden');
+            if (isCurrentlyOpen) {
+                submenu.classList.add('hidden');
+                if (arrow) arrow.classList.remove('rotate-90', 'text-blue-400');
+            } else {
+                submenu.classList.remove('hidden');
+                if (arrow) arrow.classList.add('rotate-90', 'text-blue-400');
+            }
+        }
+
+        // ==========================================
+        // SUBMENU TABLE & FORM CRUD
+        // ==========================================
+        let cachedSubmenus = [];
+        let cachedParentOptions = [];
+
+        async function loadParentSelectOptions() {
+            try {
+                const res = await fetch('/api/menus/main-list');
+                const mains = await res.json();
+                cachedParentOptions = mains;
+                const select = document.getElementById('sub-parent-id');
+                select.innerHTML = mains.map(m => `
+                    <option value="${m.id}">${m.title} (ID: ${m.id})</option>
+                `).join('');
+            } catch (err) {
+                console.error("Failed to load parent options:", err);
+            }
+        }
+
+        async function loadSubmenusTable() {
+            try {
+                const res = await fetch('/api/menus/sub-list');
+                const list = await res.json();
+                cachedSubmenus = list;
+                document.getElementById('sub-menu-count').innerText = `${list.length} Submenus`;
+
+                const tbody = document.getElementById('sub-menu-tbody');
+                if (!list.length) {
+                    tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-6 text-center text-slate-400">No submenus found. Add one above.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = list.map(s => `
+                    <tr class="hover:bg-slate-50 transition text-xs sm:text-sm">
+                        <td class="px-5 py-3.5 text-center font-mono font-bold text-slate-500">#${s.menu_order}</td>
+                        <td class="px-5 py-3.5">
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                                <i data-lucide="folder" class="w-3.5 h-3.5 text-blue-600"></i>
+                                ${s.parent_title}
+                            </span>
+                        </td>
+                        <td class="px-5 py-3.5">
+                            <div class="flex items-center gap-2">
+                                <i data-lucide="${s.icon || 'circle'}" class="w-3 h-3 text-slate-400"></i>
+                                <span class="font-bold text-slate-900">${s.title}</span>
+                            </div>
+                        </td>
+                        <td class="px-5 py-3.5 font-mono text-xs text-blue-600 truncate max-w-[150px]">${s.url}</td>
+                        <td class="px-5 py-3.5 text-center">
+                            ${s.is_disabled ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">Coming Soon</span>' : '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">Ready</span>'}
+                        </td>
+                        <td class="px-5 py-3.5 text-right">
+                            <div class="flex items-center justify-end gap-1.5">
+                                <button onclick="editSubmenu(${s.id})" class="p-1.5 rounded-lg hover:bg-blue-50 text-blue-600 transition" title="Edit Submenu">
+                                    <i data-lucide="edit-3" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="deleteSubmenu(${s.id}, '${s.title.replace(/'/g, "\\'")}')" class="p-1.5 rounded-lg hover:bg-rose-50 text-rose-600 transition" title="Delete Submenu">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+                lucide.createIcons();
+            } catch (err) {
+                console.error("Failed to load submenus:", err);
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('menu-id').value = '';
+            document.getElementById('menu-title').value = '';
+            document.getElementById('menu-url').value = '#';
+            document.getElementById('menu-icon').value = 'circle';
+            document.getElementById('menu-order').value = '1';
+            document.getElementById('menu-section').value = 'Analytics Modules';
+            document.getElementById('menu-disabled').checked = false;
+            document.getElementById('menu-active').checked = true;
+            document.getElementById('form-title').innerText = 'Add New Submenu';
+            document.getElementById('submit-btn-text').innerText = 'Save Submenu';
+        }
+
+        function editSubmenu(id) {
+            const s = cachedSubmenus.find(item => item.id === id);
+            if (!s) return;
+            document.getElementById('menu-id').value = s.id;
+            document.getElementById('sub-parent-id').value = s.parent_id;
+            document.getElementById('menu-title').value = s.title;
+            document.getElementById('menu-url').value = s.url || '#';
+            document.getElementById('menu-icon').value = s.icon || 'circle';
+            document.getElementById('menu-order').value = s.menu_order || 1;
+            document.getElementById('menu-section').value = s.section || 'Analytics Modules';
+            document.getElementById('menu-disabled').checked = s.is_disabled === 1;
+            document.getElementById('menu-active').checked = s.is_active === 1;
+            document.getElementById('form-title').innerText = `Edit Submenu: ${s.title}`;
+            document.getElementById('submit-btn-text').innerText = 'Update Submenu';
+            document.getElementById('form-container').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            const id = document.getElementById('menu-id').value;
+            const parentId = document.getElementById('sub-parent-id').value;
+            if (!parentId) {
+                alert("Please select a parent main menu.");
+                return;
+            }
+
+            const payload = {
+                parent_id: parseInt(parentId),
+                title: document.getElementById('menu-title').value.trim(),
+                subtitle: '',
+                url: document.getElementById('menu-url').value.trim() || '#',
+                icon: document.getElementById('menu-icon').value.trim() || 'circle',
+                section: document.getElementById('menu-section').value.trim() || 'Analytics Modules',
+                menu_order: parseInt(document.getElementById('menu-order').value) || 1,
+                is_disabled: document.getElementById('menu-disabled').checked ? 1 : 0,
+                is_active: document.getElementById('menu-active').checked ? 1 : 0,
+            };
+
+            try {
+                if (id) {
+                    await fetch(`/api/menus/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    await fetch('/api/menus', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+                resetForm();
+                await loadSubmenusTable();
+                await loadSidebarMenus(); // live update sidebar!
+            } catch (err) {
+                console.error("Failed to save submenu:", err);
+                alert("Error saving submenu to database.");
+            }
+        }
+
+        async function deleteSubmenu(id, title) {
+            if (!confirm(`Are you sure you want to delete submenu "${title}"?`)) {
+                return;
+            }
+            try {
+                await fetch(`/api/menus/${id}`, { method: 'DELETE' });
+                await loadSubmenusTable();
+                await loadSidebarMenus(); // live update sidebar!
+            } catch (err) {
+                console.error("Failed to delete submenu:", err);
+                alert("Error deleting submenu.");
+            }
+        }
+
+        // Init
+        loadSidebarMenus();
+        loadParentSelectOptions();
+        loadSubmenusTable();
+    </script>
+</body>
+</html>

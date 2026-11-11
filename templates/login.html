@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Printer Analytics &amp; Operations</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden">
+        
+        <!-- Header -->
+        <div class="p-8 pb-6 bg-gradient-to-b from-slate-50 to-white border-b border-slate-100 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-500/30 mb-4">
+                <i data-lucide="printer" class="w-7 h-7"></i>
+            </div>
+            <h1 class="text-2xl font-extrabold text-slate-900">Printer Analytics</h1>
+            <p class="text-xs text-slate-500 mt-1">Fleet Operations &amp; Enterprise Intelligence</p>
+        </div>
+
+        <!-- Form Body -->
+        <div class="p-8 pt-6 space-y-5">
+
+            <!-- Alert Box -->
+            <div id="login-alert" class="hidden p-3.5 rounded-xl text-xs font-semibold bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2">
+                <i data-lucide="alert-circle" class="w-4 h-4 shrink-0"></i>
+                <span id="login-alert-text">Invalid credentials</span>
+            </div>
+
+            <form onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Username or Phone</label>
+                    <div class="relative">
+                        <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5"></i>
+                        <input type="text" id="username" required placeholder="admin or phone" class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Password</label>
+                    <div class="relative">
+                        <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5"></i>
+                        <input type="password" id="password" required placeholder="Enter password" class="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition">
+                        <button type="button" onclick="togglePasswordVisibility()" class="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600">
+                            <i id="eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between text-xs pt-1">
+                    <label class="flex items-center gap-2 text-slate-600 cursor-pointer font-medium">
+                        <input type="checkbox" id="remember" class="rounded text-blue-600 focus:ring-blue-500">
+                        <span>Remember me for 30 days</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="submit-btn" class="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-500/25 transition flex items-center justify-center gap-2">
+                    <span id="btn-text">Sign In to Dashboard</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                </button>
+            </form>
+
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        function togglePasswordVisibility() {
+            const pwd = document.getElementById('password');
+            const eye = document.getElementById('eye-icon');
+            if (pwd.type === 'password') {
+                pwd.type = 'text';
+                eye.setAttribute('data-lucide', 'eye-off');
+            } else {
+                pwd.type = 'password';
+                eye.setAttribute('data-lucide', 'eye');
+            }
+            lucide.createIcons();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const alertBox = document.getElementById('login-alert');
+            const alertText = document.getElementById('login-alert-text');
+            const btn = document.getElementById('submit-btn');
+            const btnText = document.getElementById('btn-text');
+
+            alertBox.classList.add('hidden');
+            btn.disabled = true;
+            btnText.innerText = 'Verifying credentials...';
+
+            const payload = {
+                username: document.getElementById('username').value.trim(),
+                password: document.getElementById('password').value,
+                remember: document.getElementById('remember').checked
+            };
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    btnText.innerText = 'Redirecting...';
+                    window.location.href = data.redirect || '/menus/dashboard';
+                } else {
+                    alertText.innerText = data.message || 'Invalid username or password.';
+                    alertBox.classList.remove('hidden');
+                    btn.disabled = false;
+                    btnText.innerText = 'Sign In to Dashboard';
+                }
+            } catch (err) {
+                console.error("Login error:", err);
+                alertText.innerText = 'Server connection error. Please try again.';
+                alertBox.classList.remove('hidden');
+                btn.disabled = false;
+                btnText.innerText = 'Sign In to Dashboard';
+            }
+        }
+    </script>
+</body>
+</html>
