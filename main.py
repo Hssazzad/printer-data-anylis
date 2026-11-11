@@ -1,7 +1,12 @@
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
+from starlette.concurrency import run_in_threadpool
+import json
+import logging
+import threading
 import database
 from ai_service import (
     AIServiceError,
@@ -9,7 +14,12 @@ from ai_service import (
     build_business_context,
     generate_forecast,
     generate_insights,
+    stream_answer_question,
+    stream_forecast,
+    stream_insights,
 )
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Printer Analytics Dashboard",
@@ -19,6 +29,7 @@ app = FastAPI(
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 def is_authenticated(request: Request) -> bool:
     """Check if incoming request has a valid session cookie."""
@@ -316,6 +327,23 @@ def get_stats():
 # AI BUSINESS ASSISTANT (READ-ONLY)
 # ==============================================================================
 
+def _warm_ai_context():
+    try:
+        build_business_context()
+    except Exception:
+        logger.exception("AI context warm-up failed")
+
+
+@app.on_event("startup")
+def _startup_warm_ai_context():
+    """Pre-build the analytics snapshot so the first AI request is fast."""
+    threading.Thread(target=_warm_ai_context, daemon=True).start()
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(request: Request):
     """Answer a business question using a bounded read-only analytics snapshot."""
@@ -329,7 +357,9 @@ async def ai_chat(request: Request):
     if len(question) > 2000:
         return JSONResponse(status_code=422, content={"success": False, "message": "Message is too long."})
     try:
-        return {"success": True, "answer": answer_question(question, build_business_context())}
+        context = await run_in_threadpool(build_business_context)
+        answer = await run_in_threadpool(answer_question, question, context)
+        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
@@ -343,7 +373,9 @@ async def ai_insights(request: Request):
     if unauthorized:
         return unauthorized
     try:
-        return {"success": True, "answer": generate_insights(build_business_context())}
+        context = await run_in_threadpool(build_business_context)
+        answer = await run_in_threadpool(generate_insights, context)
+        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
@@ -357,11 +389,62 @@ async def ai_forecast(request: Request):
     if unauthorized:
         return unauthorized
     try:
-        return {"success": True, "answer": generate_forecast(build_business_context())}
+        context = await run_in_threadpool(build_business_context)
+        answer = await run_in_threadpool(generate_forecast, context)
+        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
         return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+
+
+@app.post("/api/ai/{action}/stream")
+async def ai_stream(action: str, request: Request):
+    """Stream AI output as server-sent events so text appears token by token."""
+    unauthorized = require_ai_auth(request)
+    if unauthorized:
+        return unauthorized
+    if action not in ("chat", "insights", "forecast"):
+        return JSONResponse(status_code=404, content={"success": False, "message": "Unknown AI action."})
+
+    question = None
+    if action == "chat":
+        payload = await request.json()
+        question = str(payload.get("message", "")).strip()
+        if not question:
+            return JSONResponse(status_code=422, content={"success": False, "message": "Message is required."})
+        if len(question) > 2000:
+            return JSONResponse(status_code=422, content={"success": False, "message": "Message is too long."})
+
+    try:
+        context = await run_in_threadpool(build_business_context)
+    except Exception:
+        logger.exception("Could not build AI business context")
+        return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+
+    if action == "chat":
+        chunks = stream_answer_question(question, context)
+    elif action == "insights":
+        chunks = stream_insights(context)
+    else:
+        chunks = stream_forecast(context)
+
+    def event_stream():
+        try:
+            for delta in chunks:
+                yield _sse({"delta": delta})
+            yield _sse({"done": True})
+        except AIServiceError as exc:
+            yield _sse({"error": str(exc)})
+        except Exception:
+            logger.exception("AI streaming request failed")
+            yield _sse({"error": "AI request failed."})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ==============================================================================

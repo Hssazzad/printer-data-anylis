@@ -129,38 +129,6 @@
                 </div>
             </div>
 
-            <!-- AI Assistant -->
-            <section class="bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-950 rounded-2xl border border-indigo-900/40 shadow-lg p-5 sm:p-6 text-white fade-up">
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/15">
-                            <i data-lucide="sparkles" class="w-5 h-5 text-cyan-300"></i>
-                        </div>
-                        <div>
-                            <h3 class="font-bold">AI Business Assistant</h3>
-                            <p class="text-[11px] text-slate-300">Read-only sales, stock and customer intelligence</p>
-                        </div>
-                    </div>
-                    <button id="ai-toggle-btn" type="button" onclick="toggleAIAssistant()" class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-white text-slate-900 hover:bg-cyan-50 text-xs font-bold transition">
-                        <i data-lucide="bot" class="w-4 h-4"></i><span>Open AI Assistant</span>
-                    </button>
-                </div>
-                <div id="ai-assistant-panel" class="hidden mt-5 border-t border-white/10 pt-5">
-                    <div class="flex flex-wrap gap-2 mb-4">
-                        <button type="button" onclick="runAIAction('insights')" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold transition">Generate Insights</button>
-                        <button type="button" onclick="runAIAction('forecast')" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold transition">3-Month Forecast</button>
-                    </div>
-                    <div id="ai-response" class="hidden rounded-xl bg-black/20 border border-white/10 p-4 text-sm text-slate-100 whitespace-pre-wrap leading-6 max-h-80 overflow-y-auto"></div>
-                    <form onsubmit="sendAIChat(event)" class="mt-3 flex flex-col sm:flex-row gap-2">
-                        <input id="ai-chat-input" type="text" maxlength="2000" placeholder="Ask about revenue, stock, customers..." class="flex-1 rounded-xl bg-white text-slate-900 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-cyan-300" autocomplete="off">
-                        <button id="ai-send-btn" type="submit" class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-bold transition">
-                            <i data-lucide="send" class="w-4 h-4"></i><span>Ask AI</span>
-                        </button>
-                    </form>
-                    <p id="ai-status" class="mt-2 text-[11px] text-slate-400">AI responses use a read-only snapshot of dashboard data.</p>
-                </div>
-            </section>
-
             <!-- KPI Cards -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 fade-up">
                 <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-blue-500 shadow-sm">
@@ -384,66 +352,6 @@
         }
         function hideError() { document.getElementById('error-banner').classList.add('hidden'); }
 
-        function toggleAIAssistant() {
-            const panel = document.getElementById('ai-assistant-panel');
-            const button = document.getElementById('ai-toggle-btn');
-            if (!panel || !button) return;
-            const isHidden = panel.classList.toggle('hidden');
-            button.querySelector('span').textContent = isHidden ? 'Open AI Assistant' : 'Close AI Assistant';
-        }
-
-        async function runAIAction(action) {
-            const responseBox = document.getElementById('ai-response');
-            const status = document.getElementById('ai-status');
-            responseBox.classList.remove('hidden');
-            responseBox.textContent = 'AI is analyzing the latest business data...';
-            status.textContent = 'Preparing a read-only analytics snapshot...';
-            try {
-                const res = await fetch(`/api/ai/${action}`, { method: 'POST' });
-                const data = await res.json();
-                if (!res.ok || !data.success) throw new Error(data.message || `Server returned ${res.status}`);
-                responseBox.textContent = data.answer;
-                status.textContent = 'Generated from the latest available dashboard data.';
-            } catch (err) {
-                responseBox.textContent = '';
-                status.textContent = err.message || 'AI request failed.';
-                status.className = 'mt-2 text-[11px] text-rose-300';
-            }
-        }
-
-        async function sendAIChat(event) {
-            event.preventDefault();
-            const input = document.getElementById('ai-chat-input');
-            const button = document.getElementById('ai-send-btn');
-            const responseBox = document.getElementById('ai-response');
-            const status = document.getElementById('ai-status');
-            const message = input.value.trim();
-            if (!message) return;
-            button.disabled = true;
-            responseBox.classList.remove('hidden');
-            responseBox.textContent = 'AI is analyzing the latest business data...';
-            status.textContent = 'Preparing a read-only analytics snapshot...';
-            status.className = 'mt-2 text-[11px] text-slate-400';
-            try {
-                const res = await fetch('/api/ai/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.success) throw new Error(data.message || `Server returned ${res.status}`);
-                responseBox.textContent = data.answer;
-                status.textContent = 'Generated from the latest available dashboard data.';
-                input.value = '';
-            } catch (err) {
-                responseBox.textContent = '';
-                status.textContent = err.message || 'AI request failed.';
-                status.className = 'mt-2 text-[11px] text-rose-300';
-            } finally {
-                button.disabled = false;
-            }
-        }
-
         async function loadDashboardOverview(force = false) {
             hideError();
             const btn = document.getElementById('refresh-btn');
@@ -582,5 +490,6 @@
         loadSidebarMenus();
         loadDashboardOverview();
     </script>
+    <script src="/static/ai_assistant.js"></script>
 </body>
 </html>
