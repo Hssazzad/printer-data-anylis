@@ -80,14 +80,16 @@ Application startup-এ `dashboard_auth`, `dashboard_session`-এর compatible 
 প্রথমবার চালুর আগে একটি backup নিন:
 
 ```powershell
-mysqldump -u root -p --routines --triggers print_db > print_db_backup.sql
+cmd /c "mysqldump -u root -p --routines --triggers print_db > print_db_backup.sql"
 ```
 
 Restore করার আগে application বন্ধ করে যাচাই করা database-এ করুন:
 
 ```powershell
-mysql -u root -p print_db < print_db_backup.sql
+cmd /c "mysql -u root -p print_db < print_db_backup.sql"
 ```
+
+PowerShell নিজে `<` input redirection সমর্থন করে না, তাই byte-accurate redirection-এর জন্য `cmd /c` wrapper ব্যবহার করা হয়েছে।
 
 Testing-এ synthetic records ব্যবহার করা হয়েছে; real business data mutate করা হয় না। Excel/PDF packages না থাকলে export endpoint স্পষ্ট `503` দেয়। Forecast seasonality, promotions, stock-outs এবং price changes model করে না। UI labels বর্তমানে প্রধানত English, backend Bengali/English প্রশ্ন এবং explanatory output সমর্থন করে; নতুন translation keys যোগ করা হয়নি।
 
