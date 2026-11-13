@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Mapping, Optional
+from datetime import date, datetime
 import time
 from .connection import get_connection
 
@@ -7,6 +8,157 @@ _RANKING_CACHE: Dict[str, Any] = {"data": None, "ts": 0, "limit": None}
 _LIST_CACHE: Dict[str, Any] = {"data": None, "ts": 0}
 _CAT_CACHE: Dict[str, Any] = {"data": None, "ts": 0}
 _TTL = 60
+
+
+def normalize_peak_filters(filters: Mapping[str, Any]) -> Dict[str, Optional[str]]:
+    """Validate report filters without changing or writing sales data."""
+    start = (filters.get("start_date") or "").strip() or None
+    end = (filters.get("end_date") or "").strip() or None
+    if start:
+        date.fromisoformat(start)
+    if end:
+        date.fromisoformat(end)
+    if start and end and start > end:
+        raise ValueError("start_date must be on or before end_date")
+    return {
+        "start_date": start,
+        "end_date": end,
+        "product_id": (filters.get("product_id") or "").strip() or None,
+        "category_id": (filters.get("category_id") or "").strip() or None,
+    }
+
+
+def _month_sequence(start: date, end: date) -> List[str]:
+    result = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        result.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    return result
+
+
+def aggregate_peak_rows(rows: List[Mapping[str, Any]], filters: Mapping[str, Any]) -> Dict[str, Any]:
+    """Aggregate synthetic or database rows, preserving negative return quantities."""
+    selected = normalize_peak_filters(filters)
+    parsed = []
+    for row in rows:
+        raw_date = row.get("sales_date")
+        if not raw_date:
+            continue
+        current = raw_date.date() if isinstance(raw_date, datetime) else raw_date
+        if isinstance(current, str):
+            current = date.fromisoformat(current[:10])
+        if selected["start_date"] and current < date.fromisoformat(selected["start_date"]):
+            continue
+        if selected["end_date"] and current > date.fromisoformat(selected["end_date"]):
+            continue
+        if selected["product_id"] and str(row.get("product_id")) != selected["product_id"]:
+            continue
+        if selected["category_id"] and selected["category_id"] not in (
+            str(row.get("category_id")), str(row.get("category_name"))
+        ):
+            continue
+        qty = float(row.get("quantity", row.get("qty", 0)) or 0)
+        amount = row.get("amount")
+        amount = float(amount) if amount is not None else qty * float(row.get("unit_price", 0) or 0)
+        parsed.append((current, qty, amount, row))
+
+    if parsed:
+        first = date.fromisoformat(selected["start_date"]) if selected["start_date"] else min(x[0] for x in parsed)
+        last = date.fromisoformat(selected["end_date"]) if selected["end_date"] else max(x[0] for x in parsed)
+    else:
+        first = date.fromisoformat(selected["start_date"]) if selected["start_date"] else date.today()
+        last = date.fromisoformat(selected["end_date"]) if selected["end_date"] else first
+
+    monthly_map: Dict[str, Dict[str, float]] = {
+        month: {"quantity": 0.0, "sales": 0.0} for month in _month_sequence(first, last)
+    }
+    yearly_map: Dict[str, Dict[str, float]] = {}
+    product_map: Dict[str, Dict[str, Any]] = {}
+    for current, qty, amount, row in parsed:
+        month = current.strftime("%Y-%m")
+        year = current.strftime("%Y")
+        monthly_map.setdefault(month, {"quantity": 0.0, "sales": 0.0})
+        monthly_map[month]["quantity"] += qty
+        monthly_map[month]["sales"] += amount
+        yearly_map.setdefault(year, {"quantity": 0.0, "sales": 0.0})
+        yearly_map[year]["quantity"] += qty
+        yearly_map[year]["sales"] += amount
+        product_id = str(row.get("product_id") or "")
+        product = product_map.setdefault(product_id, {
+            "product_id": product_id, "product_name": row.get("product_name") or product_id,
+            "monthly": {},
+        })
+        product["monthly"].setdefault(month, {"quantity": 0.0, "sales": 0.0})
+        product["monthly"][month]["quantity"] += qty
+        product["monthly"][month]["sales"] += amount
+
+    def clean(values: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
+        return [
+            {"period": period, "quantity": round(value["quantity"], 2), "sales": round(value["sales"], 2)}
+            for period, value in sorted(values.items())
+        ]
+
+    trends = []
+    for product in product_map.values():
+        product["trend"] = clean({
+            month: product["monthly"].get(month, {"quantity": 0, "sales": 0})
+            for month in monthly_map
+        })
+        del product["monthly"]
+        trends.append(product)
+    return {
+        "monthly": clean(monthly_map),
+        "yearly": clean(yearly_map),
+        "product_trends": sorted(trends, key=lambda x: sum(item["sales"] for item in x["trend"]), reverse=True),
+        "row_count": len(parsed),
+        "filters": selected,
+    }
+
+
+def get_filtered_peak_report(filters: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return date/product/category-filtered monthly, yearly and product trends."""
+    selected = normalize_peak_filters(filters)
+    clauses = ["s.SALES_DATE IS NOT NULL"]
+    params: List[Any] = []
+    if selected["start_date"]:
+        clauses.append("DATE(s.SALES_DATE) >= %s")
+        params.append(selected["start_date"])
+    if selected["end_date"]:
+        clauses.append("DATE(s.SALES_DATE) <= %s")
+        params.append(selected["end_date"])
+    if selected["product_id"]:
+        clauses.append("sd.PRODUCT_ID = %s")
+        params.append(selected["product_id"])
+    if selected["category_id"]:
+        clauses.append("(p.CATEGORY_ID = %s OR c.CATEGORY_NAME = %s)")
+        params.append(selected["category_id"])
+        params.append(selected["category_id"])
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT DATE(s.SALES_DATE) AS sales_date, sd.PRODUCT_ID AS product_id,
+                       p.PRODUCT_NAME AS product_name, p.CATEGORY_ID AS category_id,
+                       c.CATEGORY_NAME AS category_name,
+                       sd.QTY AS quantity, sd.UNIT_PRICE AS unit_price
+                FROM sales s
+                JOIN sales_details sd ON sd.SALES_ID = s.SALES_ID
+                JOIN product p ON p.PRODUCT_ID = sd.PRODUCT_ID
+                LEFT JOIN category c ON c.CATEGORY_ID = p.CATEGORY_ID
+                WHERE {' AND '.join(clauses)}
+                ORDER BY s.SALES_DATE ASC
+            """, params)
+            rows = cur.fetchall()
+    report = aggregate_peak_rows(rows, selected)
+    report["generated_at"] = datetime.now().isoformat(timespec="seconds")
+    report["calculation"] = {
+        "quantity": "SUM(sales_details.QTY); negative quantities remain negative for returns.",
+        "sales": "SUM(sales_details.QTY * sales_details.UNIT_PRICE); missing sales dates are excluded.",
+        "empty_periods": "Months inside the selected range with no sales are returned as zero.",
+    }
+    return report
 
 def clear_peak_cache():
     _TIMING_CACHE["data"] = None

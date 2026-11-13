@@ -9,7 +9,7 @@ Organized into clear modules:
 - menus: Dynamic sidebar menu management
 """
 
-from .connection import get_connection, test_connection
+from .connection import get_connection, read_only_connection_mode, test_connection
 from .analytics import (
     get_dashboard_kpis,
     get_monthly_sales_trend,
@@ -25,6 +25,9 @@ from .peak_period import (
     get_product_peak_detail,
     get_products_dropdown_list,
     get_categories_list,
+    normalize_peak_filters,
+    aggregate_peak_rows,
+    get_filtered_peak_report,
 )
 from .customer_affinity import (
     get_affinity_overview,
@@ -50,6 +53,7 @@ from .auth import (
     verify_session,
     destroy_session,
     get_session_user,
+    audit_event,
 )
 from .users import (
     get_dashboard_users_list,
@@ -66,9 +70,18 @@ from .menus import (
     get_main_menus_table,
     get_submenus_table,
 )
+from .alerts import get_smart_alerts
+from .forecasting import forecast_demand, forecast_product_demand, forecast_revenue, fill_monthly_gaps
+from .reports import can_view_reports, get_sales_report
+from .customer_affinity_report import (
+    normalize_affinity_filters,
+    aggregate_affinity_rows,
+    get_filtered_affinity_report,
+)
 
 __all__ = [
     "get_connection",
+    "read_only_connection_mode",
     "test_connection",
     "get_dashboard_kpis",
     "get_monthly_sales_trend",
@@ -82,6 +95,9 @@ __all__ = [
     "get_product_peak_detail",
     "get_products_dropdown_list",
     "get_categories_list",
+    "normalize_peak_filters",
+    "aggregate_peak_rows",
+    "get_filtered_peak_report",
     "get_affinity_overview",
     "get_customer_affinity_list",
     "get_customer_product_breakdown",
@@ -99,6 +115,7 @@ __all__ = [
     "verify_session",
     "destroy_session",
     "get_session_user",
+    "audit_event",
     "get_dashboard_users_list",
     "create_dashboard_user",
     "update_dashboard_user",
@@ -110,4 +127,14 @@ __all__ = [
     "delete_sidebar_menu",
     "get_main_menus_table",
     "get_submenus_table",
+    "get_smart_alerts",
+    "forecast_demand",
+    "forecast_product_demand",
+    "forecast_revenue",
+    "fill_monthly_gaps",
+    "can_view_reports",
+    "get_sales_report",
+    "normalize_affinity_filters",
+    "aggregate_affinity_rows",
+    "get_filtered_affinity_report",
 ]

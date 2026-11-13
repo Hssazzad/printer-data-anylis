@@ -225,6 +225,15 @@
                 </section>
             </div>
 
+            <!-- Smart alerts -->
+            <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 fade-up">
+                <div class="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div><h3 class="font-bold text-slate-900 flex items-center gap-2"><i data-lucide="bell-ring" class="w-5 h-5 text-amber-500"></i><span>Smart Alerts</span></h3><p class="text-xs text-slate-500 mt-0.5">Explainable stock and customer follow-up signals</p></div>
+                    <a href="/reports" class="text-xs font-semibold text-blue-600 hover:text-blue-700">Reports →</a>
+                </div>
+                <div id="smart-alerts-list" class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3"><p class="text-xs text-slate-400">Loading alerts...</p></div>
+            </section>
+
             <!-- Quick Actions -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 fade-up">
                 <a href="/peak-period" class="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:border-blue-300 hover:shadow-md transition flex items-center gap-4 group">
@@ -387,6 +396,7 @@
                 renderTopCustomers(data.top_customers || []);
                 renderRecentInvoices(data.recent_invoices || []);
                 renderInventory(data.inventory_summary || []);
+                renderSmartAlerts(data.alerts || []);
 
                 const ms = Math.round(performance.now() - t0);
                 document.getElementById('load-time-text').textContent = `Loaded in ${(ms/1000).toFixed(1)}s`;
@@ -485,6 +495,25 @@
                     <div class="text-right shrink-0"><div class="font-extrabold text-slate-900">${Math.round(it.current_stock || 0).toLocaleString('en-US')} units</div><div class="text-[11px] text-slate-400">${formatBDT(it.stock_valuation)}</div></div>
                 </div>
             `).join('');
+        }
+
+        function renderSmartAlerts(alerts) {
+            const container = document.getElementById('smart-alerts-list');
+            if (!alerts || !alerts.length) {
+                container.innerHTML = '<p class="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3">No urgent alerts.</p>';
+                return;
+            }
+            container.innerHTML = alerts.slice(0, 12).map(alert => {
+                const isCustomer = alert.kind === 'inactive_customer';
+                const isRefill = alert.kind === 'ink_refill';
+                const title = isCustomer ? `Inactive customer: ${alert.customer_name}` : (isRefill ? `Ink refill due: ${alert.customer_name}` : `Low stock: ${alert.product_name}`);
+                const value = isCustomer ? `Last purchase: ${alert.last_purchase || 'No purchase found'}` : (isRefill ? `Product: ${alert.product_name}` : `Current stock: ${alert.current_stock} units`);
+                return `<div class="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs">
+                    <div class="font-bold text-amber-900">${esc(title)}</div>
+                    <div class="text-amber-800 mt-1">${esc(alert.reason)}</div>
+                    <div class="text-amber-700 mt-1">Data date: ${esc(alert.data_date)} · ${esc(value)}</div>
+                </div>`;
+            }).join('');
         }
 
         loadSidebarMenus();

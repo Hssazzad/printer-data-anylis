@@ -7,11 +7,15 @@ from starlette.concurrency import run_in_threadpool
 import json
 import logging
 import threading
+import io
+import time
+from collections import defaultdict, deque
 import database
 from ai_service import (
     AIServiceError,
     answer_question,
     build_business_context,
+    context_metadata,
     generate_forecast,
     generate_insights,
     stream_answer_question,
@@ -20,6 +24,9 @@ from ai_service import (
 )
 
 logger = logging.getLogger(__name__)
+_LOGIN_ATTEMPTS = defaultdict(deque)
+_LOGIN_WINDOW_SECONDS = 300
+_LOGIN_MAX_ATTEMPTS = 5
 
 app = FastAPI(
     title="Printer Analytics Dashboard",
@@ -43,6 +50,15 @@ def require_ai_auth(request: Request) -> JSONResponse | None:
     return None
 
 
+def _append_xlsx_row(sheet, values):
+    """Append a row and force text cells to stay text so values like '=1+1' are not stored as formulas."""
+    sheet.append(values)
+    row = sheet.max_row
+    for column, value in enumerate(values, start=1):
+        if isinstance(value, str):
+            sheet.cell(row=row, column=column).data_type = "s"
+
+
 # ==============================================================================
 # AUTHENTICATION ROUTES (LOGIN / LOGOUT)
 # ==============================================================================
@@ -62,17 +78,34 @@ async def process_login(request: Request, response: Response):
     username = payload.get("username", "").strip()
     password = payload.get("password", "").strip()
     remember = payload.get("remember", False)
+    client_ip = request.client.host if request.client else "unknown"
+    attempts = _LOGIN_ATTEMPTS[client_ip]
+    now = time.time()
+    while attempts and now - attempts[0] > _LOGIN_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        return JSONResponse(status_code=429, content={"success": False, "message": "Too many login attempts. Try again later."})
 
-    user = database.authenticate_user(username, password)
+    user = database.authenticate_user(username, password, str(payload.get("otp", "")).strip())
     if not user:
+        attempts.append(now)
+        try:
+            database.audit_event(None, "login_failed", f"username={username}", client_ip)
+        except Exception:
+            logger.exception("Could not write login audit event")
         return JSONResponse(
             status_code=401,
             content={"success": False, "message": "Invalid username or password. Please try again."}
         )
 
     # Valid login -> create session
+    attempts.clear()
     days = 30 if remember else 1
     raw_token = database.create_session(user["id"], days=days)
+    try:
+        database.audit_event(user["id"], "login_success", "", client_ip)
+    except Exception:
+        logger.exception("Could not write login audit event")
     
     json_resp = JSONResponse(content={"success": True, "redirect": "/menus/dashboard"})
     json_resp.set_cookie(
@@ -90,7 +123,16 @@ async def logout(request: Request):
     """Clear session token from database and cookie, redirect to login."""
     token = request.cookies.get("session_token")
     if token:
+        user = None
+        try:
+            user = database.get_session_user(token)
+        except Exception:
+            logger.exception("Could not read session for logout audit")
         database.destroy_session(token)
+        try:
+            database.audit_event(user["id"] if user else None, "logout")
+        except Exception:
+            logger.exception("Could not write logout audit event")
     resp = RedirectResponse(url="/login", status_code=303)
     resp.delete_cookie(key="session_token")
     return resp
@@ -245,6 +287,72 @@ def get_customers_dropdown_endpoint():
     return database.get_customers_dropdown()
 
 
+def _affinity_filters(start_date: str = "", end_date: str = "", customer_id: str = "",
+                      product_id: str = "", category_id: str = ""):
+    return {
+        "start_date": start_date, "end_date": end_date,
+        "customer_id": customer_id, "product_id": product_id, "category_id": category_id,
+    }
+
+
+@app.get("/api/customer-affinity/report")
+def get_filtered_affinity_report_endpoint(request: Request, start_date: str = "", end_date: str = "",
+                                          customer_id: str = "", product_id: str = "", category_id: str = ""):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    try:
+        return database.get_filtered_affinity_report(
+            _affinity_filters(start_date, end_date, customer_id, product_id, category_id)
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+
+
+@app.get("/api/customer-affinity/report.xlsx")
+def export_filtered_affinity_report(request: Request, start_date: str = "", end_date: str = "",
+                                    customer_id: str = "", product_id: str = "", category_id: str = ""):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    try:
+        report = database.get_filtered_affinity_report(
+            _affinity_filters(start_date, end_date, customer_id, product_id, category_id)
+        )
+        from openpyxl import Workbook
+        book = Workbook()
+        customer_sheet = book.active
+        customer_sheet.title = "Customer view"
+        _append_xlsx_row(customer_sheet, ["Customer ID", "Customer", "Quantity", "Purchase frequency", "Total spending", "Last purchase"])
+        for row in report["customer_view"]:
+            _append_xlsx_row(customer_sheet, [
+                row.get("customer_id"), row.get("customer_name"), row.get("quantity"),
+                row.get("purchase_frequency"), row.get("spending"), row.get("last_purchase_date"),
+            ])
+        product_sheet = book.create_sheet("Product view")
+        _append_xlsx_row(product_sheet, ["Product ID", "Product", "Category", "Quantity", "Customers", "Purchase frequency", "Spending", "Last purchase"])
+        for row in report["product_view"]:
+            _append_xlsx_row(product_sheet, [
+                row.get("product_id"), row.get("product_name"), row.get("category_name"),
+                row.get("quantity"), row.get("customers"), row.get("purchase_frequency"),
+                row.get("spending"), row.get("last_purchase_date"),
+            ])
+        history_sheet = book.create_sheet("Purchase history")
+        _append_xlsx_row(history_sheet, ["Period", "Quantity", "Spending", "Repeat customers"])
+        for row in report["monthly"]:
+            _append_xlsx_row(history_sheet, [row["period"], row["quantity"], row["spending"], row["repeat_purchases"]])
+        output = io.BytesIO()
+        book.save(output)
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=customer-affinity-report.xlsx"},
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+    except ImportError:
+        return JSONResponse(status_code=503, content={"success": False, "message": "Excel export dependency is not installed."})
+
+
 @app.get("/menus/ink", response_class=HTMLResponse)
 @app.get("/menus/ink-dependency", response_class=HTMLResponse)
 async def ink_dependency_page(request: Request):
@@ -296,8 +404,10 @@ def get_refill_alerts_endpoint():
 
 
 @app.get("/api/dashboard/full-overview")
-def get_dashboard_full_overview():
+def get_dashboard_full_overview(request: Request):
     """Return all high-level business intelligence data in one single response."""
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
     return {
         "kpis": database.get_dashboard_kpis(),
         "monthly_trend": database.get_monthly_sales_trend(months=12),
@@ -306,7 +416,116 @@ def get_dashboard_full_overview():
         "inventory_summary": database.get_inventory_summary(limit=6),
         "top_customers": database.get_top_customers(limit=6),
         "db_status": "connected" if database.test_connection() else "disconnected",
+        "alerts": database.get_smart_alerts(),
     }
+
+
+def _report_user(request: Request):
+    return database.get_session_user(request.cookies.get("session_token"))
+
+
+def _report_access(request: Request):
+    user = _report_user(request)
+    if not database.can_view_reports(user):
+        return None
+    return user
+
+
+@app.get("/reports", response_class=HTMLResponse)
+async def reports_page(request: Request):
+    if not _report_access(request):
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse(request, "reports.html")
+
+
+@app.get("/api/reports/sales")
+def sales_report(request: Request, start_date: str = "", end_date: str = "",
+                 product_id: str = "", category_id: str = "", customer_id: str = ""):
+    if not _report_access(request):
+        return JSONResponse(status_code=403, content={"success": False, "message": "Report permission required."})
+    try:
+        return database.get_sales_report({
+            "start_date": start_date, "end_date": end_date,
+            "product_id": product_id, "category_id": category_id, "customer_id": customer_id,
+        })
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+
+
+@app.get("/api/reports/sales.xlsx")
+def sales_report_xlsx(request: Request, start_date: str = "", end_date: str = "",
+                      product_id: str = "", category_id: str = "", customer_id: str = ""):
+    if not _report_access(request):
+        return JSONResponse(status_code=403, content={"success": False, "message": "Report permission required."})
+    try:
+        report = database.get_sales_report(locals())
+        from openpyxl import Workbook
+        book = Workbook()
+        sheet = book.active
+        sheet.title = "Sales report"
+        _append_xlsx_row(sheet, ["Date", "Product", "Category", "Customer", "Quantity", "Revenue"])
+        for row in report["rows"]:
+            _append_xlsx_row(sheet, [row.get("sales_date"), row.get("product_name"), row.get("category_name"),
+                                     row.get("customer_name"), row.get("quantity"), row.get("revenue")])
+        output = io.BytesIO()
+        book.save(output)
+        output.seek(0)
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": "attachment; filename=sales-report.xlsx"})
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+    except ImportError:
+        return JSONResponse(status_code=503, content={"success": False, "message": "Excel export dependency is not installed."})
+
+
+@app.get("/api/reports/sales.pdf")
+def sales_report_pdf(request: Request, start_date: str = "", end_date: str = "",
+                     product_id: str = "", category_id: str = "", customer_id: str = ""):
+    if not _report_access(request):
+        return JSONResponse(status_code=403, content={"success": False, "message": "Report permission required."})
+    try:
+        report = database.get_sales_report(locals())
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        output = io.BytesIO()
+        pdf = canvas.Canvas(output, pagesize=A4)
+        width, height = A4
+        y = height - 45
+        pdf.setFont("Helvetica-Bold", 13)
+        pdf.drawString(40, y, "Printer Analytics - Sales Report")
+        y -= 22
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(40, y, "Filters: " + json.dumps(report["filters"], default=str))
+        y -= 22
+        for row in report["rows"]:
+            line = f'{row.get("sales_date")} | {str(row.get("product_name", ""))[:28]} | {row.get("quantity")} | {row.get("revenue")}'
+            pdf.drawString(40, y, line)
+            y -= 14
+            if y < 45:
+                pdf.showPage()
+                y = height - 45
+        pdf.save()
+        output.seek(0)
+        return StreamingResponse(output, media_type="application/pdf",
+                                 headers={"Content-Disposition": "attachment; filename=sales-report.pdf"})
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+    except ImportError:
+        return JSONResponse(status_code=503, content={"success": False, "message": "PDF export dependency is not installed."})
+
+
+@app.get("/api/alerts")
+def smart_alerts(request: Request):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    return {"alerts": database.get_smart_alerts()}
+
+
+@app.get("/api/forecast/{product_id}")
+def product_forecast(product_id: str, request: Request):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    return database.forecast_product_demand(product_id)
 
 
 @app.get("/api/db-status")
@@ -344,26 +563,43 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+async def _chat_question(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return None, JSONResponse(status_code=422, content={"success": False, "message": "Invalid JSON body."})
+    if not isinstance(payload, dict):
+        return None, JSONResponse(status_code=422, content={"success": False, "message": "Invalid request body."})
+    question = str(payload.get("message", "")).strip()
+    if not question:
+        return None, JSONResponse(status_code=422, content={"success": False, "message": "Message is required."})
+    if len(question) > 2000:
+        return None, JSONResponse(status_code=422, content={"success": False, "message": "Message is too long."})
+    return question, None
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(request: Request):
     """Answer a business question using a bounded read-only analytics snapshot."""
     unauthorized = require_ai_auth(request)
     if unauthorized:
         return unauthorized
-    payload = await request.json()
-    question = str(payload.get("message", "")).strip()
-    if not question:
-        return JSONResponse(status_code=422, content={"success": False, "message": "Message is required."})
-    if len(question) > 2000:
-        return JSONResponse(status_code=422, content={"success": False, "message": "Message is too long."})
+    question, error = await _chat_question(request)
+    if error:
+        return error
     try:
         context = await run_in_threadpool(build_business_context)
+    except Exception:
+        logger.exception("Could not build AI business context")
+        return JSONResponse(status_code=503, content={"success": False, "message": "Could not prepare business data."})
+    try:
         answer = await run_in_threadpool(answer_question, question, context)
-        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
-        return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+        logger.exception("AI chat request failed")
+        return JSONResponse(status_code=500, content={"success": False, "message": "AI request failed."})
+    return {"success": True, "answer": answer, "metadata": context_metadata(context)}
 
 
 @app.post("/api/ai/insights")
@@ -374,12 +610,17 @@ async def ai_insights(request: Request):
         return unauthorized
     try:
         context = await run_in_threadpool(build_business_context)
+    except Exception:
+        logger.exception("Could not build AI business context")
+        return JSONResponse(status_code=503, content={"success": False, "message": "Could not prepare business data."})
+    try:
         answer = await run_in_threadpool(generate_insights, context)
-        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
-        return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+        logger.exception("AI insights request failed")
+        return JSONResponse(status_code=500, content={"success": False, "message": "AI request failed."})
+    return {"success": True, "answer": answer, "metadata": context_metadata(context)}
 
 
 @app.post("/api/ai/forecast")
@@ -390,12 +631,17 @@ async def ai_forecast(request: Request):
         return unauthorized
     try:
         context = await run_in_threadpool(build_business_context)
+    except Exception:
+        logger.exception("Could not build AI business context")
+        return JSONResponse(status_code=503, content={"success": False, "message": "Could not prepare business data."})
+    try:
         answer = await run_in_threadpool(generate_forecast, context)
-        return {"success": True, "answer": answer}
     except AIServiceError as exc:
         return JSONResponse(status_code=503, content={"success": False, "message": str(exc)})
     except Exception:
-        return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+        logger.exception("AI forecast request failed")
+        return JSONResponse(status_code=500, content={"success": False, "message": "AI request failed."})
+    return {"success": True, "answer": answer, "metadata": context_metadata(context)}
 
 
 @app.post("/api/ai/{action}/stream")
@@ -409,18 +655,15 @@ async def ai_stream(action: str, request: Request):
 
     question = None
     if action == "chat":
-        payload = await request.json()
-        question = str(payload.get("message", "")).strip()
-        if not question:
-            return JSONResponse(status_code=422, content={"success": False, "message": "Message is required."})
-        if len(question) > 2000:
-            return JSONResponse(status_code=422, content={"success": False, "message": "Message is too long."})
+        question, error = await _chat_question(request)
+        if error:
+            return error
 
     try:
         context = await run_in_threadpool(build_business_context)
     except Exception:
         logger.exception("Could not build AI business context")
-        return JSONResponse(status_code=500, content={"success": False, "message": "Could not prepare business data."})
+        return JSONResponse(status_code=503, content={"success": False, "message": "Could not prepare business data."})
 
     if action == "chat":
         chunks = stream_answer_question(question, context)
@@ -429,8 +672,11 @@ async def ai_stream(action: str, request: Request):
     else:
         chunks = stream_forecast(context)
 
+    metadata = context_metadata(context)
+
     def event_stream():
         try:
+            yield _sse({"meta": metadata})
             for delta in chunks:
                 yield _sse({"delta": delta})
             yield _sse({"done": True})
@@ -471,6 +717,63 @@ def get_peak_bootstrap(limit: int = 1500):
     products = database.get_products_dropdown_list()
     categories = database.get_categories_list()
     return {"timing": timing, "ranking": ranking, "products": products, "categories": categories}
+
+
+def _peak_filters(start_date: str = "", end_date: str = "", product_id: str = "", category_id: str = ""):
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "product_id": product_id,
+        "category_id": category_id,
+    }
+
+
+@app.get("/api/peak/report")
+def get_filtered_peak_report_endpoint(request: Request, start_date: str = "", end_date: str = "",
+                                      product_id: str = "", category_id: str = ""):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    try:
+        return database.get_filtered_peak_report(_peak_filters(start_date, end_date, product_id, category_id))
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+
+
+@app.get("/api/peak/report.xlsx")
+def export_filtered_peak_report(request: Request, start_date: str = "", end_date: str = "",
+                                product_id: str = "", category_id: str = ""):
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"success": False, "message": "Unauthorized"})
+    try:
+        report = database.get_filtered_peak_report(_peak_filters(start_date, end_date, product_id, category_id))
+        from openpyxl import Workbook
+        book = Workbook()
+        monthly = book.active
+        monthly.title = "Monthly comparison"
+        _append_xlsx_row(monthly, ["Period", "Quantity", "Sales amount"])
+        for row in report["monthly"]:
+            _append_xlsx_row(monthly, [row["period"], row["quantity"], row["sales"]])
+        yearly = book.create_sheet("Yearly comparison")
+        _append_xlsx_row(yearly, ["Year", "Quantity", "Sales amount"])
+        for row in report["yearly"]:
+            _append_xlsx_row(yearly, [row["period"], row["quantity"], row["sales"]])
+        trends = book.create_sheet("Product trends")
+        _append_xlsx_row(trends, ["Product ID", "Product name", "Period", "Quantity", "Sales amount"])
+        for product in report["product_trends"]:
+            for row in product["trend"]:
+                _append_xlsx_row(trends, [product["product_id"], product["product_name"], row["period"], row["quantity"], row["sales"]])
+        output = io.BytesIO()
+        book.save(output)
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=product-peak-report.xlsx"},
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"success": False, "message": str(exc)})
+    except ImportError:
+        return JSONResponse(status_code=503, content={"success": False, "message": "Excel export dependency is not installed."})
 
 
 @app.get("/api/product-peak-detail/{product_id}")

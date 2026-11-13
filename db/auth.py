@@ -70,6 +70,14 @@ def init_auth_system():
             if cur.fetchone()["cnt"] == 0:
                 cur.execute("ALTER TABLE dashboard_auth ADD COLUMN allowed_menus TEXT DEFAULT '*' AFTER role;")
 
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dashboard_auth'
+                  AND COLUMN_NAME = 'otp_secret';
+            """)
+            if cur.fetchone()["cnt"] == 0:
+                cur.execute("ALTER TABLE dashboard_auth ADD COLUMN otp_secret VARCHAR(64) DEFAULT NULL;")
+
             # 2. Ensure dashboard_session exists
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS dashboard_session (
@@ -77,6 +85,17 @@ def init_auth_system():
                     user_id INT DEFAULT 1,
                     expires_at DATETIME NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS dashboard_audit_log (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NULL,
+                    action VARCHAR(80) NOT NULL,
+                    details VARCHAR(255) DEFAULT NULL,
+                    ip_address VARCHAR(64) DEFAULT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_audit_created_at (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """)
 
@@ -94,7 +113,7 @@ def init_auth_system():
             conn.commit()
     _auth_initialized = True
 
-def authenticate_user(username_or_phone: str, password: str) -> Optional[Dict[str, Any]]:
+def authenticate_user(username_or_phone: str, password: str, otp: str = "") -> Optional[Dict[str, Any]]:
     """Authenticate user against dashboard_auth."""
     init_auth_system()
     with get_connection() as conn:
@@ -113,12 +132,31 @@ def authenticate_user(username_or_phone: str, password: str) -> Optional[Dict[st
             calculated_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
 
             if calculated_hash == expected_hash:
+                if user.get("otp_secret"):
+                    try:
+                        import pyotp
+                        if not otp or not pyotp.TOTP(user["otp_secret"]).verify(otp):
+                            return None
+                    except ImportError:
+                        return None
                 return {
                     "id": user["id"],
                     "username": user.get("username", "admin"),
                     "phone": user.get("phone", ""),
                 }
             return None
+
+
+def audit_event(user_id: Optional[int], action: str, details: str = "", ip_address: str = "") -> None:
+    """Write an audit record without changing business data."""
+    init_auth_system()
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO dashboard_audit_log (user_id, action, details, ip_address) VALUES (%s, %s, %s, %s)",
+                (user_id, action[:80], details[:255], ip_address[:64]),
+            )
+            conn.commit()
 
 def create_session(user_id: int, days: int = 7) -> str:
     """Create a new session token and store hash in database."""

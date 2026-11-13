@@ -6,6 +6,7 @@
     <meta name="description" content="Customer Product Affinity — see which customers buy printers, toner and supplies, and how much they spend.">
     <title>Customer Product Affinity — Printer Analytics</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
@@ -120,6 +121,47 @@
                     View All Customers
                 </a>
             </div>
+
+            <!-- Filtered customer vs product report -->
+            <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 fade-up">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div><h3 class="font-bold text-slate-900">Filtered Customer vs Product Report</h3><p class="text-xs text-slate-500 mt-1">Customer and product views use the same read-only filters.</p></div>
+                    <div class="flex items-center gap-2"><span id="affinity-refresh-time" class="text-[11px] text-slate-400">Not loaded</span><button id="affinity-export" class="rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs font-bold">Excel export</button></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
+                    <label class="text-[11px] font-bold text-slate-500">From<input id="affinity-start-date" type="date" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"></label>
+                    <label class="text-[11px] font-bold text-slate-500">To<input id="affinity-end-date" type="date" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"></label>
+                    <label class="text-[11px] font-bold text-slate-500">Customer<select id="affinity-customer-filter" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">All customers</option></select></label>
+                    <label class="text-[11px] font-bold text-slate-500">Product<select id="affinity-product-filter" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">All products</option></select></label>
+                    <label class="text-[11px] font-bold text-slate-500">Category<select id="affinity-category-filter" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">All categories</option></select></label>
+                    <button id="affinity-apply" class="self-end rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-2.5 text-xs font-bold">Apply filters</button>
+                </div>
+                <div id="affinity-report-status" class="text-xs text-slate-500" aria-live="polite"></div>
+                <div id="affinity-filtered-kpis" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="h-64 relative"><canvas id="affinityCustomerChart"></canvas></div>
+                    <div class="h-64 relative"><canvas id="affinityProductChart"></canvas></div>
+                </div>
+                <div class="h-64 relative"><canvas id="affinityRepeatChart"></canvas></div>
+                <div class="border border-slate-200 rounded-xl overflow-hidden">
+                    <div class="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div class="flex items-center gap-1" role="tablist" aria-label="Report view">
+                            <button id="affinity-customer-tab" type="button" role="tab" aria-selected="true" tabindex="0" onclick="switchAffinityView('customer')" class="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold">Customer view</button>
+                            <button id="affinity-product-tab" type="button" role="tab" aria-selected="false" tabindex="0" onclick="switchAffinityView('product')" class="px-3 py-2 rounded-lg text-slate-600 text-xs font-bold hover:bg-white">Product view</button>
+                        </div>
+                        <label class="relative w-full sm:w-72">
+                            <span class="sr-only">Search report results</span>
+                            <input id="affinity-result-search" type="search" placeholder="Search results…" class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </label>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead id="affinity-results-head" class="bg-white text-[11px] uppercase font-semibold text-slate-500"></thead>
+                            <tbody id="affinity-results-body" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
 
             <!-- KPI Cards -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 fade-up">
@@ -331,6 +373,10 @@
         const detailCache = new Map();
         let detailAbort = null;
         let searchTimer = null;
+        let affinityCustomerChart = null, affinityProductChart = null, affinityRepeatChart = null;
+        let affinityReportData = null, affinityReportView = 'customer';
+        let appliedAffinityReportQuery = null;
+        let affinityResultQuery = '';
 
         function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
         function formatBDT(amount) { return '৳' + Math.round(amount || 0).toLocaleString('en-US'); }
@@ -340,6 +386,98 @@
             b.classList.remove('hidden'); lucide.createIcons();
         }
         function hideError() { document.getElementById('error-banner').classList.add('hidden'); }
+
+        function affinityReportParams() {
+            const params = new URLSearchParams();
+            [['start_date','affinity-start-date'],['end_date','affinity-end-date'],['customer_id','affinity-customer-filter'],['product_id','affinity-product-filter'],['category_id','affinity-category-filter']].forEach(([key, id]) => {
+                const value = document.getElementById(id)?.value;
+                if (value) params.set(key, value);
+            });
+            return params;
+        }
+
+        function replaceAffinityChart(previous, id, config) {
+            const el = document.getElementById(id);
+            if (!el || typeof Chart === 'undefined') return previous;
+            if (previous) previous.destroy();
+            return new Chart(el.getContext('2d'), config);
+        }
+
+        function renderAffinityReport(report) {
+            affinityReportData = report;
+            const customers = (report.customer_view || []).slice(0, 8);
+            const products = (report.product_view || []).slice(0, 8);
+            const monthly = report.monthly || [];
+            affinityCustomerChart = replaceAffinityChart(affinityCustomerChart, 'affinityCustomerChart', {
+                type: 'bar', data: { labels: customers.map(x => x.customer_name), datasets: [{ label: 'Spending', data: customers.map(x => x.spending), backgroundColor: '#2563eb' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: customers.length ? 'Top customers by spending' : 'No customer data' } } }
+            });
+            affinityProductChart = replaceAffinityChart(affinityProductChart, 'affinityProductChart', {
+                type: 'bar', data: { labels: products.map(x => x.product_name), datasets: [{ label: 'Quantity', data: products.map(x => x.quantity), backgroundColor: '#8b5cf6' }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: products.length ? 'Top products by quantity' : 'No product data' } } }
+            });
+            affinityRepeatChart = replaceAffinityChart(affinityRepeatChart, 'affinityRepeatChart', {
+                type: 'line', data: { labels: monthly.map(x => x.period), datasets: [
+                    { label: 'Spending', data: monthly.map(x => x.spending), borderColor: '#10b981', yAxisID: 'spending' },
+                    { label: 'Repeat customers', data: monthly.map(x => x.repeat_purchases), borderColor: '#f59e0b', yAxisID: 'repeat' }
+                ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Purchase history and repeat purchases' } }, scales: { spending: { beginAtZero: true }, repeat: { beginAtZero: true, position: 'right' } } }
+            });
+            renderAffinityResultsTable();
+        }
+
+        function switchAffinityView(view) {
+            affinityReportView = view;
+            const customerTab = document.getElementById('affinity-customer-tab');
+            const productTab = document.getElementById('affinity-product-tab');
+            customerTab.className = view === 'customer' ? 'px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold' : 'px-3 py-2 rounded-lg text-slate-600 text-xs font-bold hover:bg-white';
+            productTab.className = view === 'product' ? 'px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold' : 'px-3 py-2 rounded-lg text-slate-600 text-xs font-bold hover:bg-white';
+            customerTab.setAttribute('aria-selected', view === 'customer');
+            productTab.setAttribute('aria-selected', view === 'product');
+            renderAffinityResultsTable();
+        }
+
+        function renderAffinityResultsTable() {
+            const head = document.getElementById('affinity-results-head');
+            const body = document.getElementById('affinity-results-body');
+            if (!head || !body) return;
+            const source = affinityReportView === 'customer' ? (affinityReportData?.customer_view || []) : (affinityReportData?.product_view || []);
+            const query = affinityResultQuery.toLowerCase();
+            const rows = source.filter(row => JSON.stringify(row).toLowerCase().includes(query));
+            if (affinityReportView === 'customer') {
+                head.innerHTML = '<tr><th class="p-3">Customer</th><th class="p-3 text-right">Quantity</th><th class="p-3 text-right">Frequency</th><th class="p-3 text-right">Spending</th><th class="p-3 text-right">Last purchase</th><th class="p-3 text-right">Action</th></tr>';
+                body.innerHTML = rows.length ? rows.map(row => `<tr class="hover:bg-slate-50"><td class="p-3"><div class="font-bold text-slate-900">${esc(row.customer_name)}</div><div class="text-[11px] text-slate-400 font-mono">${esc(row.customer_id || 'DIRECT')}</div></td><td class="p-3 text-right">${row.quantity}</td><td class="p-3 text-right">${row.purchase_frequency}</td><td class="p-3 text-right font-bold">${formatBDT(row.spending)}</td><td class="p-3 text-right">${esc(row.last_purchase_date || '—')}</td><td class="p-3 text-right"><button type="button" data-action="inspect" data-customer-id="${esc(row.customer_id || '')}" class="rounded-lg bg-blue-50 text-blue-700 px-2 py-1 font-bold">Inspect</button></td></tr>`).join('') : '<tr><td colspan="6" class="p-6 text-center text-slate-400">No customer results match these filters.</td></tr>';
+            } else {
+                head.innerHTML = '<tr><th class="p-3">Product</th><th class="p-3">Category</th><th class="p-3 text-right">Quantity</th><th class="p-3 text-right">Customers</th><th class="p-3 text-right">Spending</th><th class="p-3 text-right">Last purchase</th><th class="p-3 text-right">Action</th></tr>';
+                body.innerHTML = rows.length ? rows.map(row => `<tr class="hover:bg-slate-50"><td class="p-3"><div class="font-bold text-slate-900">${esc(row.product_name)}</div><div class="text-[11px] text-slate-400 font-mono">${esc(row.product_id)}</div></td><td class="p-3">${esc(row.category_name)}</td><td class="p-3 text-right">${row.quantity}</td><td class="p-3 text-right">${row.customers}</td><td class="p-3 text-right font-bold">${formatBDT(row.spending)}</td><td class="p-3 text-right">${esc(row.last_purchase_date || '—')}</td><td class="p-3 text-right"><button type="button" data-action="drill-product" data-product-id="${esc(row.product_id)}" class="rounded-lg bg-violet-50 text-violet-700 px-2 py-1 font-bold">Filter</button></td></tr>`).join('') : '<tr><td colspan="7" class="p-6 text-center text-slate-400">No product results match these filters.</td></tr>';
+            }
+        }
+
+        function drillAffinityProduct(productId) {
+            const selector = document.getElementById('affinity-product-filter');
+            if (selector) selector.value = productId;
+            loadFilteredAffinityReport();
+        }
+
+        async function loadFilteredAffinityReport() {
+            const status = document.getElementById('affinity-report-status');
+            const query = affinityReportParams().toString();
+            status.textContent = 'Loading filtered report…';
+            try {
+                const res = await fetch('/api/customer-affinity/report?' + query);
+                const report = await res.json();
+                if (!res.ok) throw new Error(report.message || 'Report could not be loaded');
+                document.getElementById('affinity-refresh-time').textContent = `Refreshed ${report.generated_at || 'now'}`;
+                status.textContent = report.summary.sales_lines ? `${report.summary.sales_lines.toLocaleString()} matching sales lines.` : 'No data matches these filters.';
+                document.getElementById('affinity-filtered-kpis').innerHTML = [
+                    ['Customers', report.summary.customers], ['Products', report.summary.products],
+                    ['Quantity', report.summary.quantity], ['Spending', formatBDT(report.summary.spending)]
+                ].map(item => `<div class="rounded-xl border border-slate-200 bg-slate-50 p-3"><div class="text-[11px] uppercase font-bold text-slate-500">${item[0]}</div><div class="text-lg font-extrabold text-slate-900 mt-1">${item[1]}</div></div>`).join('');
+                renderAffinityReport(report);
+                appliedAffinityReportQuery = query;
+            } catch (err) {
+                status.textContent = err.message || 'Could not load filtered report.';
+            }
+        }
 
         async function loadAllAffinityData(force = false) {
             hideError();
@@ -356,6 +494,11 @@
                 const overview = boot.overview || {};
                 const dropdown = boot.dropdown || [];
                 const customers = boot.customers || [];
+                const [productsRes, categoriesRes] = await Promise.all([
+                    fetch('/api/products-list'), fetch('/api/categories')
+                ]);
+                const products = productsRes.ok ? await productsRes.json() : [];
+                const categories = categoriesRes.ok ? await categoriesRes.json() : [];
 
                 document.getElementById('kpi-active-clients').innerText = (overview.total_active_customers || 0).toLocaleString('en-US');
                 document.getElementById('kpi-repeat-buyers').innerText = (overview.repeat_buyers || 0).toLocaleString('en-US');
@@ -369,6 +512,10 @@
                 if (sel) {
                     sel.innerHTML = `<option value="">Select a customer…</option>` + dropdown.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
                 }
+                document.getElementById('affinity-customer-filter').innerHTML = '<option value="">All customers</option>' + customers.map(c => `<option value="${esc(c.customer_id)}">${esc(c.customer_name)} (${esc(c.customer_id)})</option>`).join('');
+                document.getElementById('affinity-product-filter').innerHTML = '<option value="">All products</option>' + products.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.category)})</option>`).join('');
+                document.getElementById('affinity-category-filter').innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+                await loadFilteredAffinityReport();
 
                 allCustomersData = customers;
                 filteredCustomers = allCustomersData;
@@ -517,7 +664,7 @@
                     <td class="px-5 py-3.5 text-center font-bold text-slate-700">${c.unique_products_bought} models</td>
                     <td class="px-5 py-3.5 text-right font-extrabold text-slate-800">${(c.total_units_bought || 0).toLocaleString('en-US')}</td>
                     <td class="px-5 py-3.5 text-right font-extrabold text-slate-900">${formatBDT(c.total_spent)}</td>
-                    <td class="px-5 py-3.5 text-right"><button onclick="inspectClient('${esc(c.customer_id)}')" class="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition inline-flex items-center gap-1"><i data-lucide="eye" class="w-3.5 h-3.5"></i>Inspect</button></td>
+                    <td class="px-5 py-3.5 text-right"><button type="button" data-action="inspect" data-customer-id="${esc(c.customer_id)}" class="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition inline-flex items-center gap-1"><i data-lucide="eye" class="w-3.5 h-3.5"></i>Inspect</button></td>
                 </tr>
             `).join('');
             lucide.createIcons();
@@ -536,6 +683,36 @@
         });
         document.getElementById('cust-search').addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && filteredCustomers.length > 0) inspectClient(filteredCustomers[0].customer_id);
+        });
+        document.getElementById('affinity-apply').addEventListener('click', loadFilteredAffinityReport);
+        document.getElementById('affinity-export').addEventListener('click', () => {
+            if (appliedAffinityReportQuery === null) {
+                document.getElementById('affinity-report-status').textContent = 'Apply filters to load a report before exporting.';
+                return;
+            }
+            window.location.href = '/api/customer-affinity/report.xlsx?' + appliedAffinityReportQuery;
+        });
+        document.getElementById('affinity-result-search').addEventListener('input', (event) => {
+            affinityResultQuery = event.target.value || '';
+            renderAffinityResultsTable();
+        });
+        ['affinity-customer-tab', 'affinity-product-tab'].forEach(id => {
+            document.getElementById(id).addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    switchAffinityView(id.includes('product') ? 'product' : 'customer');
+                }
+            });
+        });
+        document.getElementById('affinity-results-body').addEventListener('click', (event) => {
+            const button = event.target.closest('button[data-action]');
+            if (!button) return;
+            if (button.dataset.action === 'inspect') inspectClient(button.dataset.customerId || '');
+            else if (button.dataset.action === 'drill-product') drillAffinityProduct(button.dataset.productId || '');
+        });
+        document.getElementById('customers-tbody').addEventListener('click', (event) => {
+            const button = event.target.closest('button[data-action="inspect"]');
+            if (button) inspectClient(button.dataset.customerId || '');
         });
 
         loadSidebarMenus();

@@ -1,24 +1,50 @@
-import pymysql
+import contextvars
 import os
+from contextlib import contextmanager
 
-DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
-DB_NAME = os.getenv("DB_NAME", "print_db")
+import pymysql
+
+from config import env_int, load_dotenv
+
+load_dotenv()
+
+_READ_ONLY_MODE = contextvars.ContextVar("db_read_only_mode", default=False)
+
+
+@contextmanager
+def read_only_connection_mode():
+    """Route analytics queries through optional read-only credentials."""
+    token = _READ_ONLY_MODE.set(True)
+    try:
+        yield
+    finally:
+        _READ_ONLY_MODE.reset(token)
+
+
+def _credentials():
+    if _READ_ONLY_MODE.get():
+        read_only_user = os.getenv("DB_READONLY_USER", "").strip()
+        if read_only_user:
+            return read_only_user, os.getenv("DB_READONLY_PASSWORD", "")
+    return os.getenv("DB_USER", "root"), os.getenv("DB_PASSWORD", "")
+
 
 def get_connection():
     """Establish and return a database connection."""
+    user, password = _credentials()
     return pymysql.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
+        host=os.getenv("DB_HOST", "127.0.0.1"),
+        port=env_int("DB_PORT", 3306, minimum=1),
+        user=user,
+        password=password,
+        database=os.getenv("DB_NAME", "print_db"),
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=5,
+        connect_timeout=env_int("DB_CONNECT_TIMEOUT", 5, minimum=1),
+        read_timeout=env_int("DB_READ_TIMEOUT", 30, minimum=1),
+        write_timeout=env_int("DB_WRITE_TIMEOUT", 30, minimum=1),
     )
+
 
 def test_connection() -> bool:
     """Check database health."""

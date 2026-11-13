@@ -127,6 +127,27 @@
                 </div>
             </div>
 
+            <!-- Filtered report -->
+            <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 fade-up">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div><h3 class="font-bold text-slate-900">Filtered Peak Report</h3><p class="text-xs text-slate-500 mt-1">Monthly/yearly comparisons use sales quantity and line amounts from the selected filters.</p></div>
+                    <div class="flex items-center gap-2"><span id="peak-report-refresh-time" class="text-[11px] text-slate-400">Not loaded</span><button id="peak-report-export" type="button" class="rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs font-bold">Excel export</button></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                    <label class="text-[11px] font-bold text-slate-500">From<input id="peak-start-date" type="date" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"></label>
+                    <label class="text-[11px] font-bold text-slate-500">To<input id="peak-end-date" type="date" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"></label>
+                    <label class="text-[11px] font-bold text-slate-500">Product<select id="report-product-filter" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">All products</option></select></label>
+                    <label class="text-[11px] font-bold text-slate-500">Category<select id="report-category-filter" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs"><option value="">All categories</option></select></label>
+                    <button id="peak-report-apply" type="button" class="self-end rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-2.5 text-xs font-bold">Apply filters</button>
+                </div>
+                <div id="peak-report-status" class="text-xs text-slate-500" aria-live="polite"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="h-64 relative"><canvas id="peakMonthlyChart"></canvas></div>
+                    <div class="h-64 relative"><canvas id="peakYearlyChart"></canvas></div>
+                </div>
+                <div class="h-72 relative"><canvas id="peakProductTrendChart"></canvas></div>
+            </section>
+
             <!-- KPI Cards -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 fade-up">
                 <div class="bg-white p-5 rounded-2xl border border-slate-200/80 border-l-4 border-l-blue-500 shadow-sm">
@@ -357,12 +378,15 @@
         // ---------- Peak data ----------
         let currentMode = 'qty';
         let dayChartInstance = null, hourChartInstance = null, productDetailChartInstance = null;
+        let peakMonthlyChartInstance = null, peakYearlyChartInstance = null, peakProductTrendChartInstance = null;
         let allRankingData = [], filteredRankingData = [];
         let cachedRankingData = [], cachedCurrentProductDetail = null;
         let currentPage = 1;
         const pageSize = 30;
         const detailCache = new Map();
         let detailAbort = null, searchTimer = null;
+        let peakReportRequestSeq = 0;
+        let appliedPeakReportQuery = null;
 
         function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
         function formatBDT(amount) {
@@ -377,6 +401,63 @@
             b.classList.remove('hidden'); lucide.createIcons();
         }
         function hideError() { document.getElementById('error-banner').classList.add('hidden'); }
+
+        function peakReportParams() {
+            const params = new URLSearchParams();
+            [['start_date', 'peak-start-date'], ['end_date', 'peak-end-date'], ['product_id', 'report-product-filter'], ['category_id', 'report-category-filter']].forEach(([key, id]) => {
+                const value = document.getElementById(id)?.value;
+                if (value) params.set(key, value);
+            });
+            return params;
+        }
+
+        async function loadFilteredPeakReport() {
+            const requestId = ++peakReportRequestSeq;
+            const query = peakReportParams().toString();
+            const status = document.getElementById('peak-report-status');
+            status.textContent = 'Loading filtered report.';
+            try {
+                const res = await fetch('/api/peak/report?' + query);
+                const report = await res.json();
+                if (requestId !== peakReportRequestSeq) return;
+                if (!res.ok) throw new Error(report.message || 'Report could not be loaded');
+                document.getElementById('peak-report-refresh-time').textContent = `Refreshed ${report.generated_at || 'now'}`;
+                status.textContent = report.row_count ? `${report.row_count.toLocaleString()} matching sales lines. Quantity preserves returns; empty months are shown as zero.` : 'No sales match these filters.';
+                renderPeakComparisonCharts(report);
+                appliedPeakReportQuery = query;
+            } catch (err) {
+                if (requestId !== peakReportRequestSeq) return;
+                status.textContent = err.message || 'Could not load filtered report.';
+            }
+        }
+
+        function renderPeakComparisonCharts(report) {
+            const monthly = report.monthly || [], yearly = report.yearly || [];
+            const makeChart = (id, previous, config) => {
+                const el = document.getElementById(id);
+                if (!el || typeof Chart === 'undefined') return;
+                if (previous) previous.destroy();
+                return new Chart(el.getContext('2d'), config);
+            };
+            peakMonthlyChartInstance = makeChart('peakMonthlyChart', peakMonthlyChartInstance, {
+                type: 'bar', data: { labels: monthly.map(x => x.period), datasets: [
+                    { label: 'Quantity', data: monthly.map(x => x.quantity), backgroundColor: '#3b82f6', yAxisID: 'qty' },
+                    { label: 'Sales amount', data: monthly.map(x => x.sales), type: 'line', borderColor: '#10b981', yAxisID: 'sales' }
+                ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Monthly comparison' } }, scales: { qty: { beginAtZero: true }, sales: { beginAtZero: true, position: 'right' } } }
+            });
+            peakYearlyChartInstance = makeChart('peakYearlyChart', peakYearlyChartInstance, {
+                type: 'bar', data: { labels: yearly.map(x => x.period), datasets: [
+                    { label: 'Quantity', data: yearly.map(x => x.quantity), backgroundColor: '#8b5cf6', yAxisID: 'qty' },
+                    { label: 'Sales amount', data: yearly.map(x => x.sales), type: 'line', borderColor: '#f59e0b', yAxisID: 'sales' }
+                ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Yearly comparison' } }, scales: { qty: { beginAtZero: true }, sales: { beginAtZero: true, position: 'right' } } }
+            });
+            const top = (report.product_trends || []).slice(0, 5);
+            peakProductTrendChartInstance = makeChart('peakProductTrendChart', peakProductTrendChartInstance, {
+                type: 'line', data: { labels: monthly.map(x => x.period), datasets: top.map((product, index) => ({
+                    label: product.product_name, data: product.trend.map(x => x.quantity), borderColor: ['#2563eb','#10b981','#f59e0b','#8b5cf6','#ef4444'][index], tension: 0.25
+                }))}, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: top.length ? 'Top product quantity trends' : 'No product trend data' } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
 
         function switchMetricMode(mode) {
             currentMode = mode;
@@ -423,6 +504,10 @@
 
                 const catFilter = document.getElementById('category-filter');
                 if (catFilter) catFilter.innerHTML = '<option value="ALL">All Categories</option>' + categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+                const reportCat = document.getElementById('report-category-filter');
+                if (reportCat) reportCat.innerHTML = '<option value="">All categories</option>' + categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+                const reportProduct = document.getElementById('report-product-filter');
+                if (reportProduct) reportProduct.innerHTML = '<option value="">All products</option>' + productsList.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.category)})</option>`).join('');
 
                 if (timing.peak_month) {
                     const pm = document.getElementById('kpi-peak-month');
@@ -449,6 +534,7 @@
                 renderHourChart(timing.hour_distribution || []);
                 populateProductDropdown(productsList);
                 applyFilters();
+                await loadFilteredPeakReport();
 
                 const ms = Math.round(performance.now() - t0);
                 document.getElementById('load-time-text').textContent = `Loaded in ${(ms/1000).toFixed(1)}s`;
@@ -642,7 +728,7 @@
                 const avgValDisplay = hasSales ? (currentMode === 'qty' ? (Math.round(p.avg_monthly_qty).toLocaleString() + ' pcs') : formatBDT(p.avg_monthly_sales)) : '0';
                 const surgeVal = hasSales ? (currentMode === 'qty' ? p.surge_qty_pct : p.surge_sales_pct) : null;
                 return `
-                    <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="selectAndScrollProduct('${esc(p.product_id)}')">
+                    <tr class="hover:bg-slate-50 transition cursor-pointer" data-product-id="${esc(p.product_id)}">
                         <td class="px-5 py-3.5"><div class="font-bold text-slate-900 leading-snug">${esc(p.product_name)}</div><div class="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5"><span class="font-mono text-blue-600 font-semibold">${esc(p.product_id)}</span><span>·</span><span>${esc(p.category_name)}</span></div></td>
                         <td class="px-5 py-3.5 text-center">${hasSales ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 font-mono">${esc(peakMonthLabel)}</span>` : '<span class="text-slate-300 font-mono">-</span>'}</td>
                         <td class="px-5 py-3.5 text-right font-extrabold text-slate-900">${esc(peakValDisplay)}</td>
@@ -669,6 +755,18 @@
         });
 
         loadSidebarMenus();
+        document.getElementById('peak-table-tbody').addEventListener('click', (event) => {
+            const row = event.target.closest('tr[data-product-id]');
+            if (row) selectAndScrollProduct(row.dataset.productId || '');
+        });
+        document.getElementById('peak-report-apply')?.addEventListener('click', loadFilteredPeakReport);
+        document.getElementById('peak-report-export')?.addEventListener('click', () => {
+            if (appliedPeakReportQuery === null) {
+                document.getElementById('peak-report-status').textContent = 'Apply filters to load a report before exporting.';
+                return;
+            }
+            window.location.href = '/api/peak/report.xlsx?' + appliedPeakReportQuery;
+        });
         loadAllPeakData();
     </script>
     <script src="/static/ai_assistant.js"></script>
