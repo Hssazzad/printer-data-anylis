@@ -3,6 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+import database
 from db import connection as db_connection
 from db.forecasting import fill_monthly_gaps, forecast_demand, forecast_revenue
 from db.reports import can_view_reports, normalize_filters
@@ -74,6 +75,13 @@ class UpgradeFeatureTests(unittest.TestCase):
             self.assertEqual(readonly_kwargs["user"], "readonly")
             self.assertEqual(readonly_kwargs["password"], "ropw")
         self.assertEqual(db_connection._credentials()[0], os.getenv("DB_USER", "root"))
+
+    def test_database_facade_exposes_read_only_connection_mode(self):
+        self.assertIs(database.read_only_connection_mode, db_connection.read_only_connection_mode)
+        self.assertFalse(db_connection._READ_ONLY_MODE.get())
+        with database.read_only_connection_mode():
+            self.assertTrue(db_connection._READ_ONLY_MODE.get())
+        self.assertFalse(db_connection._READ_ONLY_MODE.get())
 
     def test_ai_context_removes_customer_contacts_and_has_provenance(self):
         self.addCleanup(ai_service._CONTEXT_CACHE.update, data=None, ts=0)
